@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "732530504308",
+    "firebase_url": "https://mainproject-c4112-default-rtdb.asia-southeast1.firebasedatabase.app",
+    "project_id": "mainproject-c4112",
+    "storage_bucket": "mainproject-c4112.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:732530504308:android:e1f768abd65de474f11721",
+        "android_client_info": {
+          "package_name": "com.example.linkride"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBviH-yWm0zktCwJifH3Q2Ppb1LutrCLL8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
