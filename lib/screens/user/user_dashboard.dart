@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
-import 'account_page.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'profile/account/account_page.dart';
+import 'driver_setup/driver_setup_controller.dart';
+import '../driver/ride_setup.dart';
 
 class UserDashboard extends StatefulWidget {
   const UserDashboard({super.key});
@@ -11,213 +15,229 @@ class UserDashboard extends StatefulWidget {
 class _UserDashboardState extends State<UserDashboard> {
   int _currentIndex = 0;
 
+  // Design System Colors
   final Color primaryGreen = const Color(0xFF11A860);
-  final Color lightGreen = const Color.fromARGB(255, 14, 53, 38);
   final Color darkGreen = const Color(0xFF2B5145);
-  final Color mutedGreen = const Color(0xFF64AA8E);
-  final Color bgGrey = const Color(0xFFECECEC);
-  final Color textBlack = const Color(0xFF101212);
+  final Color bgGrey = const Color(0xFFF5F5F5);
   final Color textGrey = const Color(0xFF727272);
 
-  late TextEditingController _sourceController;
-  late TextEditingController _destinationController;
-
-  @override
-  void initState() {
-    super.initState();
-    _sourceController = TextEditingController();
-    _destinationController = TextEditingController();
-  }
+  final TextEditingController _fromController = TextEditingController();
+  final TextEditingController _toController = TextEditingController();
 
   @override
   void dispose() {
-    _sourceController.dispose();
-    _destinationController.dispose();
+    _fromController.dispose();
+    _toController.dispose();
     super.dispose();
+  }
+
+  /// --- THE GATEKEEPER LOGIC ---
+  /// Triggered immediately when the "Publish" menu item is tapped.
+  Future<void> _handlePublishNavigation() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    // 1. Show a loading overlay so the user knows a check is happening
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(
+        child: CircularProgressIndicator(color: Color(0xFF11A860)),
+      ),
+    );
+
+    try {
+      // 2. Fetch the latest driver status from Firestore
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+
+      if (!mounted) return;
+      Navigator.pop(context); // Remove the loading indicator
+
+      String status = userDoc.data()?['driver_status'] ?? 'not_applied';
+
+      // 3. Direct Redirection based on status
+      if (status == 'approved') {
+        // Driver is verified -> Go to Ride Creation
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const RideSetupScreen()),
+        );
+      } else {
+        // Not applied, Pending, or Rejected -> Go to Setup Controller
+        // Setup Controller handles showing the Stepper or the Status Page
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const DriverSetupController()),
+        );
+      }
+    } catch (e) {
+      if (mounted) Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Error checking driver status")),
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: bgGrey,
-      appBar: AppBar(
-        title: Text(
-          "Search",
-          style: TextStyle(color: darkGreen, fontWeight: FontWeight.bold),
-        ),
-        centerTitle: true,
-        elevation: 0,
-        backgroundColor: lightGreen.withOpacity(0.3),
-        automaticallyImplyLeading: false,
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 12),
-            child: Icon(Icons.settings, color: darkGreen),
-          ),
-        ],
-      ),
-
-      body: _getBody(),
-
+      body: _getBody(_currentIndex),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
         selectedItemColor: primaryGreen,
         unselectedItemColor: textGrey,
+        showUnselectedLabels: true,
         type: BottomNavigationBarType.fixed,
+        backgroundColor: Colors.white,
+        elevation: 10,
         onTap: (index) {
-          setState(() => _currentIndex = index);
+          if (index == 1) {
+            // Intercept the click on "Publish"
+            _handlePublishNavigation();
+          } else {
+            // Handle other tabs normally
+            setState(() => _currentIndex = index);
+          }
         },
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.search), label: "Search"),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.add_box_outlined),
-            label: "Publish",
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.directions_car_outlined),
-            label: "Your Rides",
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.inbox_outlined),
-            label: "Inbox",
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.person_outline),
-            label: "Account",
-          ),
+          BottomNavigationBarItem(icon: Icon(Icons.add_circle_outline), label: "Publish"),
+          BottomNavigationBarItem(icon: Icon(Icons.directions_car_filled_outlined), label: "Rides"),
+          BottomNavigationBarItem(icon: Icon(Icons.chat_bubble_outline), label: "Inbox"),
+          BottomNavigationBarItem(icon: Icon(Icons.person_outline), label: "Account"),
         ],
       ),
     );
   }
 
-  // MAIN BODY SWITCH
-  Widget _getBody() {
-    switch (_currentIndex) {
-      case 0:
-        return _searchPage();
-      case 1:
-        return _placeholder("Publish Ride");
-      case 2:
-        return _placeholder("Your Rides");
-      case 3:
-        return _placeholder("Inbox");
-      case 4:
-        return const AccountPage();
-      default:
-        return _searchPage();
+  Widget _getBody(int index) {
+    switch (index) {
+      case 0: return _searchView();
+      // Case 1 is intercepted in onTap, but we return searchView as a safe fallback
+      case 1: return _searchView(); 
+      case 2: return _placeholderView("Your Booked Rides");
+      case 3: return _placeholderView("Messages");
+      case 4: return const AccountPage();
+      default: return _searchView();
     }
   }
 
-  // SEARCH PAGE (MATCHING IMAGE)
-  Widget _searchPage() {
-    return Center(
-      child: SingleChildScrollView(
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Container(
-            width: double.infinity,
-            constraints: const BoxConstraints(maxWidth: 420),
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(14),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.08),
-                  blurRadius: 12,
-                  offset: const Offset(0, 6),
-                ),
-              ],
+  // --- VIEW: SEARCH (HOME) ---
+  Widget _searchView() {
+    return Stack(
+      children: [
+        Column(
+          children: [
+            Expanded(
+              flex: 1,
+              child: SizedBox(
+                width: double.infinity,
+                child: Image.asset('assets/dash.png', fit: BoxFit.cover),
+              ),
             ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _inputBox("Leaving From", _sourceController),
-                const SizedBox(height: 15),
-
-                _inputBox("Going To", _destinationController),
-                const SizedBox(height: 15),
-
-                _dateBox(),
-                const SizedBox(height: 20),
-
-                SizedBox(
-                  width: double.infinity,
-                  height: 48,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: primaryGreen,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
+            Expanded(flex: 1, child: Container(color: bgGrey)),
+          ],
+        ),
+        Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 25),
+            child: Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.1),
+                    blurRadius: 20,
+                    offset: const Offset(0, 10),
+                  )
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _searchField("Leaving from...", Icons.circle_outlined, _fromController),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 40),
+                    child: Divider(height: 30, thickness: 1, color: Color(0xFFEEEEEE)),
+                  ),
+                  _searchField("Going to...", Icons.location_on_outlined, _toController),
+                  const SizedBox(height: 25),
+                  Row(
+                    children: [
+                      Expanded(child: _infoSelector(Icons.calendar_today_outlined, "Today")),
+                      const SizedBox(width: 10),
+                      Expanded(child: _infoSelector(Icons.person_outline, "1 passenger")),
+                    ],
+                  ),
+                  const SizedBox(height: 30),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 55,
+                    child: ElevatedButton(
+                      onPressed: () {},
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: primaryGreen,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
                       ),
-                    ),
-                    onPressed: () {},
-                    child: const Text(
-                      "Search",
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
+                      child: const Text("Search", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
-      ),
+      ],
     );
   }
 
-  // INPUT BOX
-  Widget _inputBox(String hint, TextEditingController controller) {
+  // --- HELPERS ---
+  Widget _searchField(String hint, IconData icon, TextEditingController controller) {
     return TextField(
       controller: controller,
+      style: TextStyle(color: darkGreen, fontWeight: FontWeight.w500),
       decoration: InputDecoration(
         hintText: hint,
-        hintStyle: TextStyle(color: textGrey),
-        filled: true,
-        fillColor: bgGrey,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-          borderSide: BorderSide.none,
-        ),
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 14,
-          vertical: 14,
-        ),
+        hintStyle: TextStyle(color: textGrey.withOpacity(0.7)),
+        prefixIcon: Icon(icon, color: primaryGreen),
+        border: InputBorder.none,
       ),
     );
   }
 
-  // DATE SELECTION
-  Widget _dateBox() {
+  Widget _infoSelector(IconData icon, String label) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
       decoration: BoxDecoration(
-        color: bgGrey,
-        borderRadius: BorderRadius.circular(8),
+        color: const Color(0xFFEEEEEE),
+        borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(
-            "Date Selection",
-            style: TextStyle(color: textGrey, fontSize: 14),
+          Icon(icon, size: 16, color: darkGreen),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              label,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 11, color: darkGreen, fontWeight: FontWeight.bold),
+            ),
           ),
-          const Icon(Icons.keyboard_arrow_down),
         ],
       ),
     );
   }
 
-  // PLACEHOLDER PAGES
-  Widget _placeholder(String title) {
+  Widget _placeholderView(String title) {
     return Center(
-      child: Text(
-        title,
-        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-      ),
+      child: Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
     );
   }
 }

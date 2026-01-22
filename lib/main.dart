@@ -4,6 +4,7 @@ import 'firebase_options.dart';
 import 'screens/landing_screen.dart';
 import 'screens/no_internet_screen.dart';
 import 'services/connectivity_service.dart';
+import 'screens/auth/auth_gate.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -19,7 +20,8 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       theme: ThemeData(primarySwatch: Colors.blue, useMaterial3: true),
-      home: const NetworkWrapper(child: LandingScreen()),
+      // CHANGE THIS LINE:
+      home: const NetworkWrapper(child: AuthGate()), 
     );
   }
 }

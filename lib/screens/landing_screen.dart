@@ -1,59 +1,94 @@
 import 'package:flutter/material.dart';
-import 'auth/auth_choice_screen.dart';
+import 'auth/email_entry_screen.dart';
 
 class LandingScreen extends StatelessWidget {
   const LandingScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
+    // Standardizing colors to match your account and auth pages
+    final Color primaryGreen = const Color(0xFF11A860);
+    final Color darkGreen = const Color(0xFF2B5145);
+
     return Scaffold(
-      body: Container(
-        width: double.infinity,
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Colors.blue.shade900, Colors.blue.shade500],
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-          ),
-        ),
+      backgroundColor: Colors.white, // Clean white background
+      body: SafeArea(
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(
-              Icons.directions_car_filled,
-              size: 100,
-              color: Colors.white,
+            const Spacer(),
+            
+            // 1. The Image you downloaded
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 40),
+              child: Image.asset(
+                'assets/landing_image.png',
+                fit: BoxFit.contain,
+              ),
             ),
-            const SizedBox(height: 20),
-            const Text(
-              'LINKRIDE',
+            
+            const SizedBox(height: 40),
+
+            // 2. Welcome Text
+            Text(
+              "Welcome to LinkRide",
+              textAlign: TextAlign.center,
               style: TextStyle(
-                color: Colors.white,
-                fontSize: 32,
+                fontSize: 28,
                 fontWeight: FontWeight.bold,
-                letterSpacing: 3,
+                color: darkGreen,
               ),
             ),
-            const SizedBox(height: 100),
-            ElevatedButton(
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const AuthChoiceScreen()),
-              ),
-              style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 50,
-                  vertical: 15,
+            
+            const SizedBox(height: 15),
+
+            // 3. Subtext
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 40),
+              child: Text(
+                "Experience the new way of commuting with safety and ease.",
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 16,
+                  color: Colors.grey.shade600,
+                  height: 1.5,
                 ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(30),
-                ),
-              ),
-              child: const Text(
-                'GET STARTED',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
               ),
             ),
+
+            const Spacer(),
+
+            // 4. Get Started Button
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 20),
+              child: SizedBox(
+                width: double.infinity,
+                height: 55,
+                child: ElevatedButton(
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const EmailEntryScreen()),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: primaryGreen,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(15),
+                    ),
+                    elevation: 0,
+                  ),
+                  child: const Text(
+                    "GET STARTED",
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            
+            const SizedBox(height: 20),
           ],
         ),
       ),

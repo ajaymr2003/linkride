@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../user/user_dashboard.dart';
 
 class GuardianDetailsScreen extends StatefulWidget {
   final String userId;
-
   const GuardianDetailsScreen({super.key, required this.userId});
 
   @override
@@ -12,41 +12,69 @@ class GuardianDetailsScreen extends StatefulWidget {
 }
 
 class _GuardianDetailsScreenState extends State<GuardianDetailsScreen> {
-  final TextEditingController _guardianNameController = TextEditingController();
-  final TextEditingController _guardianPhoneController = TextEditingController();
-  bool _loading = false;
+  final TextEditingController _nameController = TextEditingController();
+  final TextEditingController _phoneController = TextEditingController();
+  final _formKey = GlobalKey<FormState>();
+  bool _isLoading = false;
 
-  final Color primaryGreen = const Color.fromARGB(255, 53, 121, 88);
-  final Color lightGreen = const Color(0xFFA2E1CA);
-  final Color darkGreen = const Color.fromARGB(255, 21, 61, 49);
-  final Color mutedGreen = const Color(0xFF64AA8E);
-  final Color bgColor = const Color(0xFFECECEC);
-  final Color textBlack = const Color(0xFF101212);
-  final Color textGrey = const Color(0xFF727272);
+  final Color primaryGreen = const Color(0xFF11A860);
+  final Color darkGreen = const Color(0xFF2B5145);
 
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-
-  @override
-  void dispose() {
-    _guardianNameController.dispose();
-    _guardianPhoneController.dispose();
-    super.dispose();
+  // --- POPUP ALERT FUNCTION ---
+  void _showAlert(String title, String message) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+        title: Text(title, style: TextStyle(color: darkGreen, fontWeight: FontWeight.bold)),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text("OK", style: TextStyle(color: primaryGreen, fontWeight: FontWeight.bold, fontSize: 16)),
+          ),
+        ],
+      ),
+    );
   }
 
-  Future<void> _uploadGuardianDetails() async {
-    if (_guardianNameController.text.trim().isEmpty || _guardianPhoneController.text.trim().length != 10) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Please provide valid guardian details"), backgroundColor: Colors.red),
-      );
+  // --- SAVE LOGIC ---
+  Future<void> _saveGuardian() async {
+    // 1. Basic Form Validation
+    if (!_formKey.currentState!.validate()) return;
+
+    final String name = _nameController.text.trim();
+    final String phone = _phoneController.text.trim();
+
+    // 2. Strict Phone Validation for Popup
+    final indianMobilePattern = RegExp(r'^[6-9]\d{9}$'); // Starts with 6-9 and exactly 10 digits
+    
+    if (!indianMobilePattern.hasMatch(phone)) {
+      _showAlert("Invalid Number", "Please enter a valid 10-digit mobile number starting with 6, 7, 8, or 9.");
       return;
     }
 
-    setState(() => _loading = true);
+    setState(() => _isLoading = true);
 
     try {
-      await _firestore.collection('users').doc(widget.userId).update({
-        'guardian_name': _guardianNameController.text.trim(),
-        'guardian_phone': _guardianPhoneController.text.trim(),
+      // 3. Check if Guardian Phone is the same as User Phone
+      DocumentSnapshot userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(widget.userId)
+          .get();
+      
+      String userPhone = userDoc['phone'] ?? "";
+
+      if (userPhone == phone) {
+        setState(() => _isLoading = false);
+        _showAlert("Duplicate Number", "Guardian phone cannot be the same as your own phone number. Please provide an emergency contact.");
+        return;
+      }
+
+      // 4. Update Firestore
+      await FirebaseFirestore.instance.collection('users').doc(widget.userId).update({
+        'guardian_name': name,
+        'guardian_phone': phone,
         'guardian_details_completed': true,
       });
 
@@ -58,64 +86,70 @@ class _GuardianDetailsScreenState extends State<GuardianDetailsScreen> {
         (route) => false,
       );
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: ${e.toString()}')));
-    } finally {
-      if (mounted) setState(() => _loading = false);
+      setState(() => _isLoading = false);
+      _showAlert("System Error", "Could not save details. Please check your internet connection.");
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    // PopScope prevents the user from using the hardware back button
     return PopScope(
-      canPop: false, // Set to false to disable back button
-      onPopInvokedWithResult: (didPop, result) {
-        if (didPop) return;
-        // Optional: Show a message to the user
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("Please complete guardian details to continue"),
-            duration: Duration(seconds: 2),
-          ),
-        );
-      },
+      canPop: false, 
       child: Scaffold(
-        body: Container(
-          width: double.infinity, height: double.infinity,
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter, end: Alignment.bottomCenter,
-              colors: [lightGreen.withOpacity(0.6), bgColor],
-            ),
-          ),
-          child: SafeArea(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 30),
+        backgroundColor: Colors.white,
+        appBar: AppBar(backgroundColor: Colors.white, elevation: 0, foregroundColor: darkGreen),
+        body: SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(30.0),
+            child: Form(
+              key: _formKey,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const SizedBox(height: 60),
-                  Text("Guardian Information", style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: darkGreen)),
-                  const SizedBox(height: 8),
-                  Text("This is required for your safety during rides", style: TextStyle(fontSize: 14, color: textGrey)),
+                  Text("Guardian Details", style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: darkGreen)),
+                  const SizedBox(height: 10),
+                  Text("Provide an emergency contact for your safety.", style: TextStyle(color: Colors.grey[600], fontSize: 15)),
                   const SizedBox(height: 40),
 
-                  _buildLabel("GUARDIAN NAME"),
-                  _buildTextField(controller: _guardianNameController, hint: "e.g. John Doe", icon: Icons.person_outline),
-                  
-                  const SizedBox(height: 20),
-                  _buildLabel("GUARDIAN PHONE"),
-                  _buildTextField(controller: _guardianPhoneController, hint: "9123456789", icon: Icons.phone_android_outlined, keyboardType: TextInputType.phone, maxLength: 10),
+                  // NAME
+                  _buildLabel("GUARDIAN FULL NAME"),
+                  TextFormField(
+                    controller: _nameController,
+                    textCapitalization: TextCapitalization.words,
+                    validator: (v) => v!.isEmpty ? "Name is required" : null,
+                    decoration: _inputStyle("Enter Name", Icons.person_outline),
+                  ),
 
-                  const SizedBox(height: 50),
+                  const SizedBox(height: 25),
+
+                  // PHONE
+                  _buildLabel("GUARDIAN MOBILE NUMBER"),
+                  TextFormField(
+                    controller: _phoneController,
+                    keyboardType: TextInputType.phone,
+                    maxLength: 10,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    decoration: _inputStyle("10-Digit Number", Icons.phone_android).copyWith(
+                      prefixText: "+91 ",
+                      prefixStyle: TextStyle(fontWeight: FontWeight.bold, color: darkGreen),
+                      counterText: "",
+                    ),
+                  ),
+
+                  const SizedBox(height: 60),
+
                   SizedBox(
-                    width: double.infinity, height: 50,
+                    width: double.infinity,
+                    height: 55,
                     child: ElevatedButton(
-                      onPressed: _loading ? null : _uploadGuardianDetails,
-                      style: ElevatedButton.styleFrom(backgroundColor: primaryGreen, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
-                      child: _loading 
+                      onPressed: _isLoading ? null : _saveGuardian,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: primaryGreen,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+                      ),
+                      child: _isLoading 
                         ? const CircularProgressIndicator(color: Colors.white) 
-                        : const Text("FINISH SETUP", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                        : const Text("FINISH SETUP", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
                     ),
                   ),
                 ],
@@ -127,19 +161,20 @@ class _GuardianDetailsScreenState extends State<GuardianDetailsScreen> {
     );
   }
 
-  Widget _buildLabel(String label) => Padding(
-    padding: const EdgeInsets.only(bottom: 8, left: 2),
-    child: Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: darkGreen.withOpacity(0.8))),
-  );
+  Widget _buildLabel(String label) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8, left: 4),
+      child: Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: darkGreen.withOpacity(0.7))),
+    );
+  }
 
-  Widget _buildTextField({required TextEditingController controller, required String hint, required IconData icon, TextInputType keyboardType = TextInputType.text, int? maxLength}) {
-    return TextFormField(
-      controller: controller, keyboardType: keyboardType, maxLength: maxLength,
-      decoration: InputDecoration(
-        hintText: hint, prefixIcon: Icon(icon, color: mutedGreen, size: 18),
-        filled: true, fillColor: Colors.white, counterText: "",
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
-      ),
+  InputDecoration _inputStyle(String hint, IconData icon) {
+    return InputDecoration(
+      hintText: hint,
+      prefixIcon: Icon(icon, color: primaryGreen),
+      filled: true,
+      fillColor: Colors.grey[100],
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(15), borderSide: BorderSide.none),
     );
   }
 }
