@@ -4,7 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'edit_personal_details_page.dart';
 import 'mini_bio_page.dart';
 import 'travel_preferences_page.dart';
-import 'add_vehicle_page.dart';
+import 'vehicle/add_vehicle_page.dart';
 
 class AboutYouTab extends StatelessWidget {
   final Map<String, dynamic> userData;
