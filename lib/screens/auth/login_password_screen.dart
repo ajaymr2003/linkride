@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../admin/admin_dashboard.dart';
-import '../user/user_dashboard.dart';
+import '../user/dashboard/user_dashboard.dart';
 import 'pin_setup_screen.dart';
 import 'guardian_details_screen.dart';
 import 'forgot_password_screen.dart';
@@ -41,7 +41,7 @@ class _LoginPasswordScreenState extends State<LoginPasswordScreen> {
     );
   }
 
-  // --- LOGIN LOGIC ---
+// --- LOGIN LOGIC ---
   Future<void> _login() async {
     final password = _passController.text.trim();
     if (password.isEmpty) {
@@ -51,40 +51,35 @@ class _LoginPasswordScreenState extends State<LoginPasswordScreen> {
 
     setState(() => _isLoading = true);
 
-    // 1. HARDCODED ADMIN BYPASS
-    if (widget.email.toLowerCase() == "admin@gmail.com") {
-      if (password == "123456") { // <--- ADMIN PASSWORD STORED HERE
+    try {
+      // 1. SIGN IN WITH FIREBASE (This saves the session!)
+      UserCredential userCred = await FirebaseAuth.instance.signInWithEmailAndPassword(
+        email: widget.email,
+        password: password,
+      );
+
+      // 2. CHECK IF ADMIN
+      if (userCred.user!.email == "admin@gmail.com") {
         setState(() => _isLoading = false);
         Navigator.pushAndRemoveUntil(
           context, 
           MaterialPageRoute(builder: (_) => const AdminDashboard()), 
           (r) => false
         );
-        return;
-      } else {
-        setState(() => _isLoading = false);
-        _showErrorPopup("Incorrect Admin password.");
-        return;
+        return; 
       }
-    }
 
-    // 2. REGULAR USER LOGIN (FIREBASE AUTH)
-    try {
-      UserCredential userCred = await FirebaseAuth.instance.signInWithEmailAndPassword(
-        email: widget.email,
-        password: password,
-      );
-
-      // 3. SECURITY CHECK: HAS THE ADMIN DELETED THIS USER FROM FIRESTORE?
+      // 3. REGULAR USER: CHECK FIRESTORE
+      // We only check Firestore if it's NOT the admin
       DocumentSnapshot userDoc = await FirebaseFirestore.instance
           .collection('users')
           .doc(userCred.user!.uid)
           .get();
 
       if (!userDoc.exists) {
-        // User exists in Auth, but the document in Firestore was deleted by Admin
+        // User exists in Auth, but the document in Firestore was deleted
         await FirebaseAuth.instance.signOut();
-        _showErrorPopup("This account has been disabled or deleted by the administrator.");
+        _showErrorPopup("This account has been disabled or deleted.");
         setState(() => _isLoading = false);
         return;
       }
@@ -96,23 +91,20 @@ class _LoginPasswordScreenState extends State<LoginPasswordScreen> {
 
       if (!mounted) return;
 
-      // 5. REDIRECTION LOGIC BASED ON SETUP STATUS
+      // 5. REDIRECTION LOGIC
       if (!pinSetup) {
-        // Redirect to PIN Setup
         Navigator.pushAndRemoveUntil(
           context,
           MaterialPageRoute(builder: (_) => PinSetupScreen(userId: userCred.user!.uid)),
           (r) => false,
         );
       } else if (!guardianSetup) {
-        // Redirect to Guardian Details
         Navigator.pushAndRemoveUntil(
           context,
           MaterialPageRoute(builder: (_) => GuardianDetailsScreen(userId: userCred.user!.uid)),
           (r) => false,
         );
       } else {
-        // Everything is setup -> Dashboard
         Navigator.pushAndRemoveUntil(
           context,
           MaterialPageRoute(builder: (_) => const UserDashboard()),

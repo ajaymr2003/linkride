@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import '../user/user_dashboard.dart';
+import '../user/dashboard/user_dashboard.dart';
 
 class GuardianDetailsScreen extends StatefulWidget {
   final String userId;

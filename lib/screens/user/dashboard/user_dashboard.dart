@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'profile/account/account_page.dart';
-import 'driver_setup/driver_setup_controller.dart';
-import '../driver/ride_setup.dart';
 
+// --- FIXED IMPORTS FOR PAGES ---
+import '../profile/account/account_page.dart';           // Added ../ to reach profile
+import '../driver_setup/driver_setup_controller.dart';   // Fixed ..user typo to ../
+import '../driver/ride_setup.dart';                      // Already correct, keep as is
+import 'rides_page.dart';                                // Same folder, no prefix needed
+import 'inbox_page.dart';                                // Same folder, no prefix needed
 class UserDashboard extends StatefulWidget {
   const UserDashboard({super.key});
 
@@ -67,7 +70,6 @@ class _UserDashboardState extends State<UserDashboard> {
         );
       } else {
         // Not applied, Pending, or Rejected -> Go to Setup Controller
-        // Setup Controller handles showing the Stepper or the Status Page
         Navigator.push(
           context,
           MaterialPageRoute(builder: (_) => const DriverSetupController()),
@@ -119,8 +121,8 @@ class _UserDashboardState extends State<UserDashboard> {
       case 0: return _searchView();
       // Case 1 is intercepted in onTap, but we return searchView as a safe fallback
       case 1: return _searchView(); 
-      case 2: return _placeholderView("Your Booked Rides");
-      case 3: return _placeholderView("Messages");
+      case 2: return const RidesPage(); // <--- Connected Rides Page
+      case 3: return const InboxPage(); // <--- Connected Inbox Page
       case 4: return const AccountPage();
       default: return _searchView();
     }
@@ -232,12 +234,6 @@ class _UserDashboardState extends State<UserDashboard> {
           ),
         ],
       ),
-    );
-  }
-
-  Widget _placeholderView(String title) {
-    return Center(
-      child: Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
     );
   }
 }

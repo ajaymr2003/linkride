@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../landing_screen.dart';
-import '../user/user_dashboard.dart';
+import '../user/dashboard/user_dashboard.dart';
 import '../admin/admin_dashboard.dart';
 import 'pin_setup_screen.dart';
 import 'guardian_details_screen.dart';
