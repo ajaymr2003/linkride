@@ -20,6 +20,8 @@ class _RideStepPassengersState extends State<RideStepPassengers> {
   void initState() {
     super.initState();
     _count = widget.initialCount;
+    // Ensure we don't start above the new limit if editing an old ride
+    if (_count > 3) _count = 3;
   }
 
   @override
@@ -37,39 +39,68 @@ class _RideStepPassengersState extends State<RideStepPassengers> {
               color: Color(0xFF2B5145),
             ),
           ),
+          const SizedBox(height: 10),
           const Text(
             "How many seats are available?",
             style: TextStyle(color: Colors.grey),
           ),
-          const Spacer(),
-
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              _circleBtn(Icons.remove, () {
-                if (_count > 1) setState(() => _count--);
-              }),
-              Text(
-                "$_count",
-                style: const TextStyle(
-                  fontSize: 60,
-                  fontWeight: FontWeight.bold,
-                  color: Color(0xFF11A860),
+          
+          // Using Expanded to push the counter to the center vertically
+          Expanded(
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                // DECREMENT BUTTON
+                _circleBtn(
+                  Icons.remove, 
+                  () {
+                    if (_count > 1) setState(() => _count--);
+                  },
+                  isEnabled: _count > 1
                 ),
-              ),
-              _circleBtn(Icons.add, () {
-                if (_count < 8) setState(() => _count++);
-              }),
-            ],
-          ),
+                
+                const SizedBox(width: 40),
 
-          const Spacer(),
+                // NUMBER DISPLAY
+                SizedBox(
+                  width: 80,
+                  child: Center(
+                    child: Text(
+                      "$_count",
+                      style: const TextStyle(
+                        fontSize: 80, // Made slightly bigger for visibility
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF11A860),
+                        height: 1.0,
+                      ),
+                    ),
+                  ),
+                ),
+
+                const SizedBox(width: 40),
+
+                // INCREMENT BUTTON
+                _circleBtn(
+                  Icons.add, 
+                  () {
+                    // CHANGED LIMIT TO 3 HERE
+                    if (_count < 3) setState(() => _count++);
+                  },
+                  isEnabled: _count < 3
+                ),
+              ],
+            ),
+          ),
+          
           SizedBox(
             width: double.infinity,
             height: 55,
             child: ElevatedButton(
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF11A860),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
               ),
               onPressed: () => widget.onCountSelected(_count),
               child: const Text(
@@ -86,16 +117,21 @@ class _RideStepPassengersState extends State<RideStepPassengers> {
     );
   }
 
-  Widget _circleBtn(IconData icon, VoidCallback onTap) {
+  Widget _circleBtn(IconData icon, VoidCallback onTap, {bool isEnabled = true}) {
     return InkWell(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(15),
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          border: Border.all(color: const Color(0xFF11A860), width: 2),
+      onTap: isEnabled ? onTap : null,
+      borderRadius: BorderRadius.circular(50),
+      child: Opacity(
+        opacity: isEnabled ? 1.0 : 0.3, // Dim button if disabled
+        child: Container(
+          padding: const EdgeInsets.all(15),
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(color: const Color(0xFF11A860), width: 2),
+            color: Colors.white,
+          ),
+          child: Icon(icon, size: 30, color: const Color(0xFF11A860)),
         ),
-        child: Icon(icon, size: 30, color: const Color(0xFF11A860)),
       ),
     );
   }
