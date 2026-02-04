@@ -18,7 +18,7 @@ class _PassengerStepSourceState extends State<PassengerStepSource> {
 
   final Color primaryGreen = const Color(0xFF11A860);
 
-  // Search API
+  // --- 1. SEARCH API ---
   Future<void> _searchLocation(String query) async {
     if (query.isEmpty) {
       if (mounted) setState(() => _locationResults = []);
@@ -42,7 +42,7 @@ class _PassengerStepSourceState extends State<PassengerStepSource> {
     }
   }
 
-  // GPS Logic
+  // --- 2. GPS LOCATION ---
   Future<void> _getCurrentLocation() async {
     setState(() => _isGettingGPS = true);
     try {
@@ -58,9 +58,15 @@ class _PassengerStepSourceState extends State<PassengerStepSource> {
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        String name = data['display_name'].split(',')[0]; // Simple name
+        String name = data['display_name'].split(',')[0]; 
+        
         if (mounted) {
-           Navigator.pop(context, name); // Return result immediately
+           // RETURN MAP with COORDS
+           Navigator.pop(context, {
+             'name': name,
+             'lat': position.latitude,
+             'lng': position.longitude,
+           }); 
         }
       }
     } catch (e) {
@@ -68,6 +74,20 @@ class _PassengerStepSourceState extends State<PassengerStepSource> {
     } finally {
       if(mounted) setState(() => _isGettingGPS = false);
     }
+  }
+
+  // --- 3. SELECT LIST ITEM ---
+  void _selectPlace(dynamic place) {
+    String name = place['display_name'].split(',')[0];
+    double lat = double.parse(place['lat']);
+    double lng = double.parse(place['lon']);
+
+    // RETURN MAP with COORDS
+    Navigator.pop(context, {
+      'name': name,
+      'lat': lat,
+      'lng': lng,
+    });
   }
 
   @override
@@ -87,7 +107,6 @@ class _PassengerStepSourceState extends State<PassengerStepSource> {
         padding: const EdgeInsets.all(20),
         child: Column(
           children: [
-            // Input Field
             TextField(
               controller: _controller,
               autofocus: true,
@@ -102,7 +121,6 @@ class _PassengerStepSourceState extends State<PassengerStepSource> {
             ),
             const SizedBox(height: 15),
 
-            // Use Current Location
             InkWell(
               onTap: _isGettingGPS ? null : _getCurrentLocation,
               child: Padding(
@@ -120,7 +138,6 @@ class _PassengerStepSourceState extends State<PassengerStepSource> {
             ),
             const Divider(),
 
-            // Results List
             Expanded(
               child: _isLoading 
                 ? const Center(child: CircularProgressIndicator())
@@ -129,13 +146,11 @@ class _PassengerStepSourceState extends State<PassengerStepSource> {
                     separatorBuilder: (c, i) => const Divider(height: 1),
                     itemBuilder: (context, index) {
                       final place = _locationResults[index];
-                      final name = place['display_name'].split(',')[0];
-                      final full = place['display_name'];
                       return ListTile(
                         leading: const Icon(Icons.location_on_outlined, color: Colors.grey),
-                        title: Text(name, style: const TextStyle(fontWeight: FontWeight.bold)),
-                        subtitle: Text(full, maxLines: 1, overflow: TextOverflow.ellipsis),
-                        onTap: () => Navigator.pop(context, name), // Return result
+                        title: Text(place['display_name'].split(',')[0], style: const TextStyle(fontWeight: FontWeight.bold)),
+                        subtitle: Text(place['display_name'], maxLines: 1, overflow: TextOverflow.ellipsis),
+                        onTap: () => _selectPlace(place),
                       );
                     },
                   ),
@@ -145,4 +160,4 @@ class _PassengerStepSourceState extends State<PassengerStepSource> {
       ),
     );
   }
-}
+} 

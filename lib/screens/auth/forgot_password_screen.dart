@@ -33,8 +33,9 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
           TextButton(
             onPressed: () {
               Navigator.pop(context);
-              if (success)
+              if (success) {
                 Navigator.pop(context); // Go back to login screen if successful
+              }
             },
             child: Text(
               "OK",

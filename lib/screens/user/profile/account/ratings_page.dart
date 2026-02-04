@@ -6,7 +6,6 @@ class RatingsPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     const primaryGreen = Color(0xFF11A860);
-    const darkGreen = Color(0xFF2B5145);
 
     return DefaultTabController(
       length: 2,
@@ -76,29 +75,5 @@ class RatingsPage extends StatelessWidget {
     }
 
     // Example List Item if data existed
-    return ListView.builder(
-      padding: const EdgeInsets.all(20),
-      itemCount: 3,
-      itemBuilder: (context, index) {
-        return Column(
-          children: [
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: const CircleAvatar(child: Icon(Icons.person)),
-              title: const Text("John Doe", style: TextStyle(fontWeight: FontWeight.bold)),
-              subtitle: const Text("Great passenger, very punctual!"),
-              trailing: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: const [
-                  Text("5.0", style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF11A860))),
-                  Icon(Icons.star, size: 16, color: Color(0xFF11A860)),
-                ],
-              ),
-            ),
-            const Divider(),
-          ],
-        );
-      },
-    );
   }
 }

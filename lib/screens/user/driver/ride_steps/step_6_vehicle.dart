@@ -39,8 +39,9 @@ class RideStepVehicle extends StatelessWidget {
                   .collection('vehicles')
                   .snapshots(),
               builder: (context, snapshot) {
-                if (!snapshot.hasData)
+                if (!snapshot.hasData) {
                   return const Center(child: CircularProgressIndicator());
+                }
 
                 if (snapshot.data!.docs.isEmpty) {
                   return Center(

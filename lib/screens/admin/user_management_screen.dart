@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'user_detail_view.dart'; // Ensure this import exists
 
 class UserManagementScreen extends StatefulWidget {
   const UserManagementScreen({super.key});
@@ -10,120 +11,130 @@ class UserManagementScreen extends StatefulWidget {
 
 class _UserManagementScreenState extends State<UserManagementScreen> {
   final Color primaryGreen = const Color(0xFF11A860);
-  final Color darkGreen = const Color(0xFF2B5145);
-  bool _isDeleting = false;
+  
+  // Filter State
+  String _selectedFilter = 'All'; // Options: 'All', 'Drivers', 'Passengers'
 
-  // Delete user from Firestore only (Free Plan workaround)
-  Future<void> _deleteUser(String uid, String name) async {
-    bool confirm = await showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Remove User?"),
-        content: Text(
-          "This will remove $name from the database. They will no longer be able to access their profile.",
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text("Cancel"),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text("REMOVE", style: TextStyle(color: Colors.red)),
-          ),
-        ],
-      ),
-    );
-
-    if (confirm != true) return;
-
-    setState(() => _isDeleting = true);
-
-    try {
-      // We only delete from Firestore because we are on the Free Plan
-      await FirebaseFirestore.instance.collection('users').doc(uid).delete();
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("User $name removed from database")),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text("Error: ${e.toString()}")));
-      }
-    } finally {
-      if (mounted) setState(() => _isDeleting = false);
+  // Helper to build the query based on filter
+  Query _buildQuery() {
+    Query query = FirebaseFirestore.instance.collection('users');
+    
+    if (_selectedFilter == 'Drivers') {
+      return query.where('driver_status', isEqualTo: 'approved');
+    } else if (_selectedFilter == 'Passengers') {
+      // Using notEqualTo to find users who aren't approved drivers
+      return query.where('driver_status', isNotEqualTo: 'approved'); 
     }
+    return query;
   }
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      children: [
-        Scaffold(
-          appBar: AppBar(
-            title: const Text("User Management"),
-            backgroundColor: primaryGreen,
-            foregroundColor: Colors.white,
+    return Scaffold(
+      appBar: AppBar(
+        title: Text("$_selectedFilter Users"),
+        backgroundColor: primaryGreen,
+        foregroundColor: Colors.white,
+        actions: [
+          // --- FILTER BUTTON ---
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.filter_list),
+            onSelected: (value) {
+              setState(() => _selectedFilter = value);
+            },
+            itemBuilder: (context) => [
+              const PopupMenuItem(value: "All", child: Text("All Users")),
+              const PopupMenuItem(value: "Drivers", child: Text("Drivers Only")),
+              const PopupMenuItem(value: "Passengers", child: Text("Passengers Only")),
+            ],
           ),
-          body: StreamBuilder<QuerySnapshot>(
-            stream: FirebaseFirestore.instance.collection('users').snapshots(),
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Center(child: CircularProgressIndicator());
-              }
-              if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                return const Center(child: Text("No users found."));
-              }
+          const SizedBox(width: 10),
+        ],
+      ),
+      body: StreamBuilder<QuerySnapshot>(
+        stream: _buildQuery().snapshots(),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+            return const Center(child: Text("No users found matching filter."));
+          }
 
-              return ListView.builder(
-                itemCount: snapshot.data!.docs.length,
-                padding: const EdgeInsets.all(12),
-                itemBuilder: (context, index) {
-                  var user = snapshot.data!.docs[index];
-                  var data = user.data() as Map<String, dynamic>;
-                  String uid = user.id;
+          return ListView.builder(
+            itemCount: snapshot.data!.docs.length,
+            padding: const EdgeInsets.all(12),
+            itemBuilder: (context, index) {
+              var user = snapshot.data!.docs[index];
+              var data = user.data() as Map<String, dynamic>;
+              String uid = user.id;
+              bool isDriver = data['driver_status'] == 'approved';
 
-                  return Card(
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: ListTile(
-                      leading: CircleAvatar(
-                        backgroundColor: primaryGreen.withOpacity(0.1),
-                        child: Icon(Icons.person, color: primaryGreen),
+              return Card(
+                elevation: 2,
+                margin: const EdgeInsets.only(bottom: 12),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(12),
+                  // --- NAVIGATION TO DETAIL VIEW ---
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => UserDetailView(uid: uid),
                       ),
-                      title: Text(
-                        data['name'] ?? 'No Name',
-                        style: const TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                      subtitle: Text(data['email'] ?? 'No Email'),
-                      trailing: IconButton(
-                        icon: const Icon(
-                          Icons.delete_forever,
-                          color: Colors.red,
+                    );
+                  },
+                  child: Padding(
+                    padding: const EdgeInsets.all(12.0),
+                    child: Row(
+                      children: [
+                        // Avatar
+                        CircleAvatar(
+                          radius: 25,
+                          backgroundColor: isDriver ? Colors.green.shade100 : Colors.blue.shade100,
+                          backgroundImage: data['profile_pic'] != null ? NetworkImage(data['profile_pic']) : null,
+                          child: data['profile_pic'] == null 
+                            ? Icon(isDriver ? Icons.drive_eta : Icons.person, color: isDriver ? Colors.green : Colors.blue) 
+                            : null,
                         ),
-                        onPressed: () =>
-                            _deleteUser(uid, data['name'] ?? 'User'),
-                      ),
+                        const SizedBox(width: 15),
+                        
+                        // Info
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                data['name'] ?? 'No Name',
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                              ),
+                              Text(
+                                data['email'] ?? 'No Email',
+                                style: TextStyle(color: Colors.grey[600], fontSize: 13),
+                              ),
+                              if (isDriver)
+                                Container(
+                                  margin: const EdgeInsets.only(top: 5),
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                  decoration: BoxDecoration(color: Colors.green.shade50, borderRadius: BorderRadius.circular(4)),
+                                  child: const Text("DRIVER", style: TextStyle(fontSize: 10, color: Colors.green, fontWeight: FontWeight.bold)),
+                                )
+                            ],
+                          ),
+                        ),
+
+                        // Navigation Arrow (Delete button removed)
+                        const Icon(Icons.chevron_right, color: Colors.grey),
+                      ],
                     ),
-                  );
-                },
+                  ),
+                ),
               );
             },
-          ),
-        ),
-        if (_isDeleting)
-          Container(
-            color: Colors.black45,
-            child: const Center(
-              child: CircularProgressIndicator(color: Colors.white),
-            ),
-          ),
-      ],
+          );
+        },
+      ),
     );
   }
 }

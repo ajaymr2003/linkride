@@ -3,9 +3,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
 
-// Import your existing search steps
-import '../driver/ride_steps/step_1_location.dart';
-import '../driver/ride_steps/step_2_destination.dart';
+import 'step_1_location.dart';
+import 'step_2_destination.dart';
 
 class EditRidePage extends StatefulWidget {
   final String docId;
@@ -30,14 +29,33 @@ class _EditRidePageState extends State<EditRidePage> {
   Map<String, dynamic>? _selectedVehicle;
   bool _isLoading = false;
 
+  // New: Store full location objects (Map) if user updates them
+  Map<String, dynamic>? _newSourceObj;
+  Map<String, dynamic>? _newDestObj;
+
   final Color primaryGreen = const Color(0xFF11A860);
 
   @override
   void initState() {
     super.initState();
     final data = widget.initialData;
-    _sourceController = TextEditingController(text: data['source']);
-    _destController = TextEditingController(text: data['destination']);
+
+    // Handle Source: Check if it's new Map format or old String format
+    if (data['source'] is Map) {
+      _sourceController = TextEditingController(text: data['source']['name']);
+      _newSourceObj = data['source']; // Keep existing map
+    } else {
+      _sourceController = TextEditingController(text: data['source']);
+    }
+
+    // Handle Destination
+    if (data['destination'] is Map) {
+      _destController = TextEditingController(text: data['destination']['name']);
+      _newDestObj = data['destination']; // Keep existing map
+    } else {
+      _destController = TextEditingController(text: data['destination']);
+    }
+
     _priceController = TextEditingController(text: data['price_per_seat'].toString());
     
     DateTime dt = (data['departure_time'] as Timestamp).toDate();
@@ -47,7 +65,7 @@ class _EditRidePageState extends State<EditRidePage> {
     _selectedVehicle = data['vehicle'];
   }
 
-  // --- NAVIGATION TO SEARCH STEP 1 (SOURCE) ---
+  // --- SOURCE PICKER ---
   void _openSourcePicker() async {
     final result = await Navigator.push(
       context,
@@ -58,20 +76,23 @@ class _EditRidePageState extends State<EditRidePage> {
             title: "Edit Pickup",
             hint: "Search new location",
             icon: Icons.my_location,
-            onLocationSelected: (location) {
-              Navigator.pop(context, location); // Return the string
+            onLocationSelected: (locationMap) {
+              Navigator.pop(context, locationMap); // Returns Map
             },
           ),
         ),
       ),
     );
 
-    if (result != null) {
-      setState(() => _sourceController.text = result);
+    if (result != null && result is Map<String, dynamic>) {
+      setState(() {
+        _sourceController.text = result['name'];
+        _newSourceObj = result;
+      });
     }
   }
 
-  // --- NAVIGATION TO SEARCH STEP 2 (DESTINATION) ---
+  // --- DESTINATION PICKER ---
   void _openDestinationPicker() async {
     final result = await Navigator.push(
       context,
@@ -79,16 +100,19 @@ class _EditRidePageState extends State<EditRidePage> {
         builder: (context) => Scaffold(
           appBar: AppBar(elevation: 0, backgroundColor: Colors.white, foregroundColor: Colors.black),
           body: RideStepDestination(
-            onLocationSelected: (location) {
-              Navigator.pop(context, location); // Return the string
+            onLocationSelected: (locationMap) {
+              Navigator.pop(context, locationMap); // Returns Map
             },
           ),
         ),
       ),
     );
 
-    if (result != null) {
-      setState(() => _destController.text = result);
+    if (result != null && result is Map<String, dynamic>) {
+      setState(() {
+        _destController.text = result['name'];
+        _newDestObj = result;
+      });
     }
   }
 
@@ -101,9 +125,20 @@ class _EditRidePageState extends State<EditRidePage> {
         _selectedTime.hour, _selectedTime.minute,
       );
 
+      // Determine final Source/Dest data to save
+      // If user didn't pick new location, keep old data (whether Map or String)
+      // If user DID pick new location, save the new Map.
+      var finalSource = _newSourceObj ?? widget.initialData['source'];
+      var finalDest = _newDestObj ?? widget.initialData['destination'];
+
+      // Edge case: If old was String and user edited text manually (not supported here but safe fallback)
+      if (_newSourceObj == null && _sourceController.text != widget.initialData['source'] && widget.initialData['source'] is String) {
+        finalSource = _sourceController.text;
+      }
+
       await FirebaseFirestore.instance.collection('rides').doc(widget.docId).update({
-        'source': _sourceController.text.trim(),
-        'destination': _destController.text.trim(),
+        'source': finalSource,
+        'destination': finalDest,
         'departure_time': Timestamp.fromDate(finalDateTime),
         'available_seats': _seats,
         'price_per_seat': double.parse(_priceController.text),
@@ -139,12 +174,8 @@ class _EditRidePageState extends State<EditRidePage> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _buildSectionTitle("ROUTE"),
-              
-              // FROM FIELD (Clickable)
               _readOnlyInputField("From", _sourceController, Icons.circle_outlined, _openSourcePicker),
               const SizedBox(height: 15),
-              
-              // TO FIELD (Clickable)
               _readOnlyInputField("To", _destController, Icons.location_on, _openDestinationPicker),
               
               const SizedBox(height: 30),
@@ -222,7 +253,6 @@ class _EditRidePageState extends State<EditRidePage> {
     );
   }
 
-  // Helper for From/To fields that open the searcher
   Widget _readOnlyInputField(String label, TextEditingController controller, IconData icon, VoidCallback onTap) {
     return InkWell(
       onTap: onTap,
@@ -239,7 +269,6 @@ class _EditRidePageState extends State<EditRidePage> {
     );
   }
 
-  // Standard editable field for Price
   Widget _editableInputField(String label, TextEditingController controller, IconData icon, {bool isNumber = false}) {
     return TextFormField(
       controller: controller,

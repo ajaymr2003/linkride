@@ -23,14 +23,6 @@ class _StepEmailVerificationState extends State<StepEmailVerification> {
   }
 
   // Original check logic (Bypassed for testing, but kept for reference)
-  Future<void> _check() async {
-    await user?.reload();
-    user = FirebaseAuth.instance.currentUser;
-    if (user?.emailVerified ?? false) { 
-      _timer?.cancel(); 
-      setState(() => _isVerified = true); 
-    }
-  }
 
   @override
   Widget build(BuildContext context) {

@@ -24,6 +24,7 @@ class _UserDashboardState extends State<UserDashboard> {
   // Design System Colors
   final Color primaryGreen = const Color(0xFF11A860);
   final Color textGrey = const Color(0xFF727272);
+  final Color darkGreen = const Color(0xFF2B5145);
   final Color bgGrey = const Color(0xFFF5F5F5);
 
   /// --- THE GATEKEEPER LOGIC ---
@@ -66,9 +67,18 @@ class _UserDashboardState extends State<UserDashboard> {
 
   @override
   Widget build(BuildContext context) {
+    // We only show the Dashboard AppBar on the Search (Home) screen.
+    // Other tabs (Rides, Inbox, Account) have their own specific AppBars.
+    final bool showAppBar = _currentIndex == 0;
+
     return Scaffold(
       backgroundColor: bgGrey,
+      
+      // --- ADDED TOP BAR ---
+      appBar: showAppBar ? _buildHomeAppBar() : null,
+      
       body: _getBody(_currentIndex),
+      
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
         selectedItemColor: primaryGreen,
@@ -92,6 +102,88 @@ class _UserDashboardState extends State<UserDashboard> {
           BottomNavigationBarItem(icon: Icon(Icons.person_outline), label: "Account"),
         ],
       ),
+    );
+  }
+
+  PreferredSizeWidget _buildHomeAppBar() {
+    final user = FirebaseAuth.instance.currentUser;
+    String firstName = "Traveler";
+    
+    // Attempt to get first name from Display Name
+    if (user?.displayName != null && user!.displayName!.isNotEmpty) {
+      firstName = user.displayName!.split(' ')[0];
+    } else {
+      // Fallback: Try to fetch name from Firestore if displayName isn't set in Auth
+      // (This is a lightweight optimization, usually Auth has it)
+    }
+
+    return AppBar(
+      backgroundColor: Colors.white,
+      elevation: 0,
+      toolbarHeight: 70, // Slightly taller for better look
+      title: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: primaryGreen.withOpacity(0.1),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(Icons.near_me, color: primaryGreen, size: 24),
+          ),
+          const SizedBox(width: 12),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                "LinkRide",
+                style: TextStyle(
+                  color: darkGreen,
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 0.5,
+                ),
+              ),
+              Text(
+                "Hello, $firstName!",
+                style: TextStyle(
+                  color: Colors.grey.shade600,
+                  fontSize: 12,
+                  fontWeight: FontWeight.normal,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+      actions: [
+        IconButton(
+          icon: Stack(
+            children: [
+              Icon(Icons.notifications_none_rounded, color: darkGreen, size: 28),
+              Positioned(
+                top: 2,
+                right: 2,
+                child: Container(
+                  width: 8,
+                  height: 8,
+                  decoration: const BoxDecoration(
+                    color: Colors.red,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              )
+            ],
+          ),
+          onPressed: () {
+            // Notification logic here
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text("No new notifications")),
+            );
+          },
+        ),
+        const SizedBox(width: 10),
+      ],
     );
   }
 

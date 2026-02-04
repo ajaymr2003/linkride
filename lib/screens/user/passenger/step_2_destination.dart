@@ -18,9 +18,12 @@ class _PassengerStepDestinationState extends State<PassengerStepDestination> {
   
   List<dynamic> _locationResults = [];
   bool _showMap = false;
-  LatLng _center = const LatLng(11.2588, 75.7804); // Default Calicut
+  LatLng _center = const LatLng(11.2588, 75.7804); 
   String _address = "";
   Timer? _debounce;
+
+  // Store result temporarily before confirming
+  Map<String, dynamic>? _selectedData;
 
   Future<void> _searchLocation(String query) async {
     if (query.isEmpty) { setState(() => _locationResults = []); return; }
@@ -40,8 +43,54 @@ class _PassengerStepDestinationState extends State<PassengerStepDestination> {
       _controller.text = name;
       _showMap = true;
       _locationResults = [];
+      
+      // Store Lat/Lng
+      _selectedData = {
+        'name': name,
+        'lat': lat,
+        'lng': lon
+      };
     });
     Future.delayed(const Duration(milliseconds: 100), () => _mapController.move(_center, 15));
+  }
+
+  // --- REVERSE GEOCODING (When dragging map) ---
+  Future<void> _getAddressFromCoords(LatLng point) async {
+    try {
+      final url = Uri.parse('https://nominatim.openstreetmap.org/reverse?format=json&lat=${point.latitude}&lon=${point.longitude}&zoom=18');
+      final response = await http.get(url, headers: {'User-Agent': 'com.example.linkride'});
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        String name = data['display_name'].split(',').take(2).join(',').trim();
+        if(mounted) {
+          setState(() {
+            _address = name;
+            _controller.text = name;
+            _selectedData = {
+              'name': name,
+              'lat': point.latitude,
+              'lng': point.longitude
+            };
+          });
+        }
+      }
+    } catch (_) {}
+  }
+
+  void _onMapInteractionEnd(MapEvent event) {
+    if (_debounce?.isActive ?? false) _debounce!.cancel();
+    _debounce = Timer(const Duration(milliseconds: 800), () {
+      _getAddressFromCoords(_mapController.camera.center);
+    });
+  }
+
+  void _onConfirm() {
+    if (_selectedData != null) {
+      Navigator.pop(context, _selectedData);
+    } else {
+      // Fallback if typed but not selected (unsafe but prevents crash)
+      Navigator.pop(context, {'name': _controller.text, 'lat': 0.0, 'lng': 0.0});
+    }
   }
 
   @override
@@ -56,18 +105,23 @@ class _PassengerStepDestinationState extends State<PassengerStepDestination> {
       ),
       body: Stack(
         children: [
-          // MAP LAYER
           if (_showMap)
             FlutterMap(
               mapController: _mapController,
-              options: MapOptions(initialCenter: _center, initialZoom: 15),
+              options: MapOptions(
+                initialCenter: _center, 
+                initialZoom: 15,
+                onMapEvent: (event) {
+                  if (event is MapEventMoveEnd || event is MapEventFlingAnimationEnd) {
+                    _onMapInteractionEnd(event);
+                  }
+                },
+              ),
               children: [
                 TileLayer(urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', userAgentPackageName: 'com.example.linkride'),
-                const Center(child: Padding(padding: EdgeInsets.only(bottom: 30), child: Icon(Icons.location_on, size: 40, color: Colors.red))),
               ],
             ),
 
-          // SEARCH LAYER
           Column(
             children: [
               Container(
@@ -108,12 +162,14 @@ class _PassengerStepDestinationState extends State<PassengerStepDestination> {
             ],
           ),
 
-          // CONFIRM BUTTON
+          if (_showMap)
+             const Center(child: Padding(padding: EdgeInsets.only(bottom: 40), child: Icon(Icons.location_on, size: 50, color: Colors.red))),
+
           if (_showMap)
             Positioned(
               bottom: 30, left: 20, right: 20,
               child: ElevatedButton(
-                onPressed: () => Navigator.pop(context, _address.isEmpty ? _controller.text : _address),
+                onPressed: _onConfirm,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF11A860),
                   padding: const EdgeInsets.symmetric(vertical: 15),

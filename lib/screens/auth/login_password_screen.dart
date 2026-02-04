@@ -111,7 +111,7 @@ class _LoginPasswordScreenState extends State<LoginPasswordScreen> {
           (r) => false,
         );
       }
-    } on FirebaseAuthException catch (e) {
+    } on FirebaseAuthException {
       _showErrorPopup("Incorrect password or authentication failed.");
     } catch (e) {
       _showErrorPopup("A connection error occurred. Check your internet.");
