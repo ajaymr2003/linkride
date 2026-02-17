@@ -122,7 +122,7 @@ packages:
     source: hosted
     version: "5.1.1"
   cloud_functions:
-    dependency: "direct dev"
+    dependency: "direct main"
     description:
       name: cloud_functions
       sha256: de61b0a5112252555f78655b0f6dbe7db241e41613249202819b71064ad35b5a

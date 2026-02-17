@@ -1,4 +1,7 @@
-  import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:intl/intl.dart';
 
 class InboxPage extends StatelessWidget {
   const InboxPage({super.key});
@@ -35,112 +38,131 @@ class InboxPage extends StatelessWidget {
     );
   }
 
-  // --- TAB 1: MESSAGES ---
+  // --- TAB 1: MESSAGES (Real-time from Firestore) ---
   Widget _buildMessagesTab() {
-    // Placeholder Data - Connect to Firestore 'chats' collection later
-    final List<Map<String, dynamic>> dummyChats = [
-      {
-        "name": "Arjun K",
-        "message": "Hey, are you leaving from the bus stand?",
-        "time": "10:30 AM",
-        "unread": 2,
-        "avatar": null
-      },
-      {
-        "name": "Fathima S",
-        "message": "Thanks for the ride!",
-        "time": "Yesterday",
-        "unread": 0,
-        "avatar": null
-      }
-    ];
+    final String uid = FirebaseAuth.instance.currentUser?.uid ?? "";
 
-    if (dummyChats.isEmpty) {
-      return _buildEmptyState(Icons.chat_bubble_outline, "No messages yet", "Chat with drivers or passengers here.");
-    }
+    return StreamBuilder<QuerySnapshot>(
+      // Assuming you have a 'chats' collection where users are listed in a 'participants' array
+      stream: FirebaseFirestore.instance
+          .collection('chats')
+          .where('participants', arrayContains: uid)
+          .orderBy('last_message_time', descending: true)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
 
-    return ListView.builder(
-      itemCount: dummyChats.length,
-      itemBuilder: (context, index) {
-        final chat = dummyChats[index];
-        return ListTile(
-          contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-          leading: CircleAvatar(
-            backgroundColor: primaryGreen.withOpacity(0.1),
-            child: Text(chat['name'][0], style: TextStyle(color: primaryGreen, fontWeight: FontWeight.bold)),
-          ),
-          title: Text(chat['name'], style: const TextStyle(fontWeight: FontWeight.bold)),
-          subtitle: Text(chat['message'], maxLines: 1, overflow: TextOverflow.ellipsis),
-          trailing: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(chat['time'], style: const TextStyle(fontSize: 12, color: Colors.grey)),
-              const SizedBox(height: 5),
-              if (chat['unread'] > 0)
-                Container(
-                  padding: const EdgeInsets.all(6),
-                  decoration: BoxDecoration(color: primaryGreen, shape: BoxShape.circle),
-                  child: Text(chat['unread'].toString(), style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
-                )
-            ],
-          ),
-          onTap: () {
-            // Navigate to Chat Screen
+        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+          return _buildEmptyState(Icons.chat_bubble_outline, "No messages yet", "Chat with drivers or passengers here.");
+        }
+
+        return ListView.builder(
+          itemCount: snapshot.data!.docs.length,
+          itemBuilder: (context, index) {
+            var chat = snapshot.data!.docs[index].data() as Map<String, dynamic>;
+            
+            // Logic to find the OTHER user's name in the chat
+            String otherUserName = chat['other_user_name'] ?? "User"; 
+            String lastMsg = chat['last_message'] ?? "No messages yet";
+            Timestamp? time = chat['last_message_time'];
+
+            return ListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+              leading: CircleAvatar(
+                backgroundColor: primaryGreen.withOpacity(0.1),
+                child: Text(otherUserName[0].toUpperCase(), style: TextStyle(color: primaryGreen, fontWeight: FontWeight.bold)),
+              ),
+              title: Text(otherUserName, style: const TextStyle(fontWeight: FontWeight.bold)),
+              subtitle: Text(lastMsg, maxLines: 1, overflow: TextOverflow.ellipsis),
+              trailing: Text(
+                time != null ? DateFormat('h:mm a').format(time.toDate()) : "",
+                style: const TextStyle(fontSize: 12, color: Colors.grey),
+              ),
+              onTap: () {
+                // Navigate to specific chat screen using chat document ID
+              },
+            );
           },
         );
       },
     );
   }
 
-  // --- TAB 2: NOTIFICATIONS ---
+  // --- TAB 2: NOTIFICATIONS (Real-time from Firestore) ---
   Widget _buildNotificationsTab() {
-    final List<Map<String, dynamic>> dummyNotifs = [
-      {
-        "title": "Ride Approved",
-        "body": "Your request to join Arjun's ride was approved.",
-        "time": "2h ago",
-        "icon": Icons.check_circle,
-        "color": Colors.green
-      },
-      {
-        "title": "Document Update",
-        "body": "Your driver license has been verified successfully.",
-        "time": "1d ago",
-        "icon": Icons.verified_user,
-        "color": Colors.blue
-      }
-    ];
+    final String uid = FirebaseAuth.instance.currentUser?.uid ?? "";
 
-    if (dummyNotifs.isEmpty) {
-      return _buildEmptyState(Icons.notifications_none, "No notifications", "We'll let you know when something happens.");
-    }
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('notifications')
+          .where('uid', isEqualTo: uid)
+          .orderBy('timestamp', descending: true)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
 
-    return ListView.separated(
-      padding: const EdgeInsets.all(15),
-      itemCount: dummyNotifs.length,
-      separatorBuilder: (c, i) => const Divider(height: 1),
-      itemBuilder: (context, index) {
-        final notif = dummyNotifs[index];
-        return ListTile(
-          contentPadding: const EdgeInsets.symmetric(vertical: 8),
-          leading: Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: notif['color'].withOpacity(0.1),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(notif['icon'], color: notif['color'], size: 20),
-          ),
-          title: Text(notif['title'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-          subtitle: Padding(
-            padding: const EdgeInsets.only(top: 5),
-            child: Text(notif['body'], style: TextStyle(color: Colors.grey.shade600)),
-          ),
-          trailing: Text(notif['time'], style: const TextStyle(fontSize: 12, color: Colors.grey)),
+        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+          return _buildEmptyState(Icons.notifications_none, "No notifications", "We'll let you know when something happens.");
+        }
+
+        return ListView.separated(
+          padding: const EdgeInsets.all(15),
+          itemCount: snapshot.data!.docs.length,
+          separatorBuilder: (c, i) => const Divider(height: 1),
+          itemBuilder: (context, index) {
+            var notif = snapshot.data!.docs[index].data() as Map<String, dynamic>;
+            
+            // Dynamic Icons based on notification type
+            IconData icon = Icons.notifications;
+            Color iconColor = primaryGreen;
+            
+            if (notif['type'] == 'ride_approved') {
+              icon = Icons.check_circle;
+              iconColor = Colors.green;
+            } else if (notif['type'] == 'ride_cancelled') {
+              icon = Icons.cancel;
+              iconColor = Colors.red;
+            }
+
+            return ListTile(
+              contentPadding: const EdgeInsets.symmetric(vertical: 8),
+              leading: Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: iconColor.withOpacity(0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(icon, color: iconColor, size: 20),
+              ),
+              title: Text(notif['title'] ?? "Update", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+              subtitle: Padding(
+                padding: const EdgeInsets.only(top: 5),
+                child: Text(notif['message'] ?? "", style: TextStyle(color: Colors.grey.shade600)),
+              ),
+              trailing: Text(
+                _formatTimestamp(notif['timestamp']),
+                style: const TextStyle(fontSize: 12, color: Colors.grey),
+              ),
+            );
+          },
         );
       },
     );
+  }
+
+  // Helper to format timestamps for notifications
+  String _formatTimestamp(Timestamp? timestamp) {
+    if (timestamp == null) return "";
+    DateTime date = timestamp.toDate();
+    Duration diff = DateTime.now().difference(date);
+    
+    if (diff.inMinutes < 60) return "${diff.inMinutes}m ago";
+    if (diff.inHours < 24) return "${diff.inHours}h ago";
+    return DateFormat('d MMM').format(date);
   }
 
   Widget _buildEmptyState(IconData icon, String title, String sub) {

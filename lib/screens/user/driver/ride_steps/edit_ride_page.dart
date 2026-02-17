@@ -29,7 +29,6 @@ class _EditRidePageState extends State<EditRidePage> {
   Map<String, dynamic>? _selectedVehicle;
   bool _isLoading = false;
 
-  // New: Store full location objects (Map) if user updates them
   Map<String, dynamic>? _newSourceObj;
   Map<String, dynamic>? _newDestObj;
 
@@ -40,18 +39,16 @@ class _EditRidePageState extends State<EditRidePage> {
     super.initState();
     final data = widget.initialData;
 
-    // Handle Source: Check if it's new Map format or old String format
     if (data['source'] is Map) {
       _sourceController = TextEditingController(text: data['source']['name']);
-      _newSourceObj = data['source']; // Keep existing map
+      _newSourceObj = data['source'];
     } else {
       _sourceController = TextEditingController(text: data['source']);
     }
 
-    // Handle Destination
     if (data['destination'] is Map) {
       _destController = TextEditingController(text: data['destination']['name']);
-      _newDestObj = data['destination']; // Keep existing map
+      _newDestObj = data['destination'];
     } else {
       _destController = TextEditingController(text: data['destination']);
     }
@@ -65,7 +62,6 @@ class _EditRidePageState extends State<EditRidePage> {
     _selectedVehicle = data['vehicle'];
   }
 
-  // --- SOURCE PICKER ---
   void _openSourcePicker() async {
     final result = await Navigator.push(
       context,
@@ -77,7 +73,7 @@ class _EditRidePageState extends State<EditRidePage> {
             hint: "Search new location",
             icon: Icons.my_location,
             onLocationSelected: (locationMap) {
-              Navigator.pop(context, locationMap); // Returns Map
+              Navigator.pop(context, locationMap);
             },
           ),
         ),
@@ -92,7 +88,6 @@ class _EditRidePageState extends State<EditRidePage> {
     }
   }
 
-  // --- DESTINATION PICKER ---
   void _openDestinationPicker() async {
     final result = await Navigator.push(
       context,
@@ -101,7 +96,7 @@ class _EditRidePageState extends State<EditRidePage> {
           appBar: AppBar(elevation: 0, backgroundColor: Colors.white, foregroundColor: Colors.black),
           body: RideStepDestination(
             onLocationSelected: (locationMap) {
-              Navigator.pop(context, locationMap); // Returns Map
+              Navigator.pop(context, locationMap);
             },
           ),
         ),
@@ -125,16 +120,8 @@ class _EditRidePageState extends State<EditRidePage> {
         _selectedTime.hour, _selectedTime.minute,
       );
 
-      // Determine final Source/Dest data to save
-      // If user didn't pick new location, keep old data (whether Map or String)
-      // If user DID pick new location, save the new Map.
       var finalSource = _newSourceObj ?? widget.initialData['source'];
       var finalDest = _newDestObj ?? widget.initialData['destination'];
-
-      // Edge case: If old was String and user edited text manually (not supported here but safe fallback)
-      if (_newSourceObj == null && _sourceController.text != widget.initialData['source'] && widget.initialData['source'] is String) {
-        finalSource = _sourceController.text;
-      }
 
       await FirebaseFirestore.instance.collection('rides').doc(widget.docId).update({
         'source': finalSource,
@@ -173,6 +160,10 @@ class _EditRidePageState extends State<EditRidePage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // --- NEW: REQUESTS BUTTON ---
+              _buildRequestSummary(),
+              const SizedBox(height: 20),
+
               _buildSectionTitle("ROUTE"),
               _readOnlyInputField("From", _sourceController, Icons.circle_outlined, _openSourcePicker),
               const SizedBox(height: 15),
@@ -253,6 +244,51 @@ class _EditRidePageState extends State<EditRidePage> {
     );
   }
 
+  // Widget to show number of pending requests and button
+  Widget _buildRequestSummary() {
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('bookings')
+          .where('ride_id', isEqualTo: widget.docId)
+          .where('status', isEqualTo: 'pending')
+          .snapshots(),
+      builder: (context, snapshot) {
+        int count = snapshot.hasData ? snapshot.data!.docs.length : 0;
+        
+        return Container(
+          padding: const EdgeInsets.all(15),
+          decoration: BoxDecoration(
+            color: count > 0 ? Colors.orange.shade50 : Colors.grey.shade50,
+            borderRadius: BorderRadius.circular(15),
+            border: Border.all(color: count > 0 ? Colors.orange.shade200 : Colors.grey.shade200),
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.people_outline, color: count > 0 ? Colors.orange : Colors.grey),
+              const SizedBox(width: 15),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text("$count Pending Requests", style: const TextStyle(fontWeight: FontWeight.bold)),
+                    const Text("Review passengers for this ride", style: TextStyle(fontSize: 12, color: Colors.grey)),
+                  ],
+                ),
+              ),
+              TextButton(
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => RideBookingsScreen(rideId: widget.docId)),
+                ),
+                child: Text("VIEW", style: TextStyle(color: primaryGreen, fontWeight: FontWeight.bold)),
+              )
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   Widget _readOnlyInputField(String label, TextEditingController controller, IconData icon, VoidCallback onTap) {
     return InkWell(
       onTap: onTap,
@@ -292,5 +328,89 @@ class _EditRidePageState extends State<EditRidePage> {
         child: Row(children: [Icon(icon, size: 18, color: primaryGreen), const SizedBox(width: 10), Text(text, style: const TextStyle(fontWeight: FontWeight.bold))]),
       ),
     );
+  }
+}
+
+// --- NEW PAGE: RideBookingsScreen ---
+class RideBookingsScreen extends StatelessWidget {
+  final String rideId;
+  const RideBookingsScreen({super.key, required this.rideId});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text("Ride Requests")),
+      body: StreamBuilder<QuerySnapshot>(
+        stream: FirebaseFirestore.instance
+            .collection('bookings')
+            .where('ride_id', isEqualTo: rideId)
+            .snapshots(),
+        builder: (context, snapshot) {
+          if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+          if (snapshot.data!.docs.isEmpty) return const Center(child: Text("No requests for this ride."));
+
+          return ListView.builder(
+            padding: const EdgeInsets.all(15),
+            itemCount: snapshot.data!.docs.length,
+            itemBuilder: (context, index) {
+              var data = snapshot.data!.docs[index].data() as Map<String, dynamic>;
+              var bookingId = snapshot.data!.docs[index].id;
+              
+              return FutureBuilder<DocumentSnapshot>(
+                future: FirebaseFirestore.instance.collection('users').doc(data['passenger_uid']).get(),
+                builder: (context, userSnap) {
+                  String name = userSnap.hasData ? (userSnap.data!['name'] ?? "User") : "Loading...";
+                  
+                  return Card(
+                    margin: const EdgeInsets.only(bottom: 10),
+                    child: ListTile(
+                      title: Text(name),
+                      subtitle: Text("Status: ${data['status'].toString().toUpperCase()}"),
+                      trailing: data['status'] == 'pending' 
+                        ? Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                icon: const Icon(Icons.check_circle, color: Colors.green),
+                                onPressed: () => _handleStatus(context, bookingId, rideId, 'accepted'),
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.cancel, color: Colors.red),
+                                onPressed: () => _handleStatus(context, bookingId, rideId, 'rejected'),
+                              ),
+                            ],
+                          )
+                        : null,
+                    ),
+                  );
+                },
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+
+  Future<void> _handleStatus(BuildContext context, String bookingId, String rId, String status) async {
+    try {
+      if (status == 'accepted') {
+        // Run a transaction to ensure we don't overbook
+        await FirebaseFirestore.instance.runTransaction((transaction) async {
+          DocumentReference rideRef = FirebaseFirestore.instance.collection('rides').doc(rId);
+          DocumentSnapshot rideSnap = await transaction.get(rideRef);
+          
+          int available = rideSnap['available_seats'] ?? 0;
+          if (available < 1) throw "No seats available!";
+          
+          transaction.update(rideRef, {'available_seats': available - 1});
+          transaction.update(FirebaseFirestore.instance.collection('bookings').doc(bookingId), {'status': 'accepted'});
+        });
+      } else {
+        await FirebaseFirestore.instance.collection('bookings').doc(bookingId).update({'status': 'rejected'});
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
+    }
   }
 }

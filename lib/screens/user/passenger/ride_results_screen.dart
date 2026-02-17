@@ -1,14 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart'; // Added for UID check
 import 'package:intl/intl.dart';
 import 'package:geolocator/geolocator.dart';
-
-// Import the edit steps
 import 'step_1_source.dart';
 import 'step_2_destination.dart';
 import 'step_3_details.dart';
-
-// Import the new Ride View Screen
 import 'ride_view_screen.dart'; 
 
 class RideResultsScreen extends StatefulWidget {
@@ -30,7 +27,6 @@ class RideResultsScreen extends StatefulWidget {
 }
 
 class _RideResultsScreenState extends State<RideResultsScreen> {
-  // Current search parameters (mutable so we can edit them)
   late Map<String, dynamic> _source;
   late Map<String, dynamic> _destination;
   late DateTime _date;
@@ -48,51 +44,35 @@ class _RideResultsScreenState extends State<RideResultsScreen> {
     _passengers = widget.passengers;
   }
 
-  // --- SHOW EDIT BOX (Bottom Sheet) ---
+  // --- UI HELPER FOR THE EDIT SHEET (NO CHANGES HERE) ---
   void _showEditSheet() {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(25))),
       builder: (context) => StatefulBuilder(
-        builder: (ctx, setModalState) => Container(
+        builder: (context, setModalState) => Container(
           padding: const EdgeInsets.all(25),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               const Text("Edit Search", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
               const SizedBox(height: 20),
-              
               _editRow("From", _source['name'], Icons.circle_outlined, () async {
                 final res = await Navigator.push(context, MaterialPageRoute(builder: (_) => const PassengerStepSource()));
-                if (res != null) {
-                  setModalState(() => _source = res);
-                  setState(() => _source = res);
-                }
+                if (res != null) { setModalState(() => _source = res); setState(() => _source = res); }
               }),
-              
               _editRow("To", _destination['name'], Icons.location_on, () async {
                 final res = await Navigator.push(context, MaterialPageRoute(builder: (_) => const PassengerStepDestination()));
-                if (res != null) {
-                  setModalState(() => _destination = res);
-                  setState(() => _destination = res);
-                }
+                if (res != null) { setModalState(() => _destination = res); setState(() => _destination = res); }
               }),
-              
               _editRow("Date & Seats", "${DateFormat('dd MMM').format(_date)} • $_passengers", Icons.tune, () async {
                 final res = await Navigator.push(context, MaterialPageRoute(builder: (_) => PassengerStepDetails(initialDate: _date, initialPassengers: _passengers)));
                 if (res != null) {
-                  setModalState(() {
-                    _date = res['date'];
-                    _passengers = res['passengers'];
-                  });
-                  setState(() {
-                    _date = res['date'];
-                    _passengers = res['passengers'];
-                  });
+                  setModalState(() { _date = res['date']; _passengers = res['passengers']; });
+                  setState(() { _date = res['date']; _passengers = res['passengers']; });
                 }
               }),
-              
               const SizedBox(height: 20),
               SizedBox(
                 width: double.infinity, height: 50,
@@ -102,7 +82,6 @@ class _RideResultsScreenState extends State<RideResultsScreen> {
                   child: const Text("SEE UPDATED RIDES", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                 ),
               ),
-              const SizedBox(height: 10),
             ],
           ),
         ),
@@ -123,41 +102,31 @@ class _RideResultsScreenState extends State<RideResultsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Determine start and end of the selected day for Firestore query
-    DateTime startOfDay = DateTime(_date.year, _date.month, _date.day);
-    DateTime endOfDay = startOfDay.add(const Duration(days: 1));
+    DateTime now = DateTime.now();
+    final user = FirebaseAuth.instance.currentUser;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5F5),
       body: SafeArea(
         child: Column(
           children: [
-            // --- TOP SEARCH BOX (Header) ---
+            // --- HEADER SEARCH BOX ---
             Padding(
               padding: const EdgeInsets.all(15),
               child: GestureDetector(
                 onTap: _showEditSheet,
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 12),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(12),
-                    boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10)],
-                  ),
+                  decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10)]),
                   child: Row(
                     children: [
-                      IconButton(
-                        icon: const Icon(Icons.arrow_back),
-                        onPressed: () => Navigator.pop(context),
-                      ),
+                      IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => Navigator.pop(context)),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text("${_source['name']} → ${_destination['name']}", 
-                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14), overflow: TextOverflow.ellipsis),
-                            Text("${DateFormat('dd MMM').format(_date)} • $_passengers Passengers", 
-                              style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                            Text("${_source['name']} → ${_destination['name']}", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14), overflow: TextOverflow.ellipsis),
+                            Text("${DateFormat('dd MMM').format(_date)} • $_passengers Passengers", style: const TextStyle(fontSize: 12, color: Colors.grey)),
                           ],
                         ),
                       ),
@@ -168,66 +137,86 @@ class _RideResultsScreenState extends State<RideResultsScreen> {
               ),
             ),
 
-            // --- RIDES LIST ---
+            // --- RIDES LIST (Nested StreamBuilders) ---
             Expanded(
+              // 1. GET USER'S EXISTING BOOKINGS FIRST
               child: StreamBuilder<QuerySnapshot>(
                 stream: FirebaseFirestore.instance
-                    .collection('rides')
-                    .where('status', isEqualTo: 'active')
-                    .where('departure_time', isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay))
-                    .where('departure_time', isLessThan: Timestamp.fromDate(endOfDay))
+                    .collection('bookings')
+                    .where('passenger_uid', isEqualTo: user?.uid)
                     .snapshots(),
-                builder: (context, snapshot) {
-                  if (snapshot.connectionState == ConnectionState.waiting) {
-                    return const Center(child: CircularProgressIndicator());
-                  }
-                  
-                  if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                    return _buildEmpty();
-                  }
-                  
-                  var rides = snapshot.data!.docs;
-                  
-                  // --- CLIENT SIDE FILTERING ---
-                  // 1. Check seat count
-                  // 2. Check geolocation distance (within 20km radius for Source and Dest)
-                  var filtered = rides.where((doc) {
-                    var data = doc.data() as Map<String, dynamic>;
-                    
-                    // Filter 1: Seats
-                    if ((data['available_seats'] ?? 0) < _passengers) return false;
-                    
-                    // Filter 2: Location Distance
-                    try {
-                      double dS = Geolocator.distanceBetween(
-                        _source['lat'], 
-                        _source['lng'], 
-                        data['source']['lat'], 
-                        data['source']['lng']
-                      );
-                      
-                      double dD = Geolocator.distanceBetween(
-                        _destination['lat'], 
-                        _destination['lng'], 
-                        data['destination']['lat'], 
-                        data['destination']['lng']
-                      );
-
-                      // 20km Radius buffer
-                      return dS <= 20000 && dD <= 20000;
-                    } catch (e) { 
-                      return false; 
+                builder: (context, bookingSnapshot) {
+                  // Create a Map of rideId -> status for quick lookup
+                  Map<String, String> userBookings = {};
+                  if (bookingSnapshot.hasData) {
+                    for (var doc in bookingSnapshot.data!.docs) {
+                      userBookings[doc['ride_id']] = doc['status'];
                     }
-                  }).toList();
+                  }
 
-                  if (filtered.isEmpty) return _buildEmpty();
+                  // 2. FETCH AVAILABLE RIDES
+                  return StreamBuilder<QuerySnapshot>(
+                    stream: FirebaseFirestore.instance
+                        .collection('rides')
+                        .where('status', isEqualTo: 'active')
+                        .where('departure_time', isGreaterThanOrEqualTo: Timestamp.fromDate(now))
+                        .snapshots(),
+                    builder: (context, rideSnapshot) {
+                      if (rideSnapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
+                      if (!rideSnapshot.hasData || rideSnapshot.data!.docs.isEmpty) return _buildEmpty();
 
-                  return ListView.builder(
-                    padding: const EdgeInsets.symmetric(horizontal: 15),
-                    itemCount: filtered.length,
-                    itemBuilder: (context, index) {
-                      var doc = filtered[index];
-                      return _buildRideCard(doc.data() as Map<String, dynamic>, doc.id);
+                      // Filtering logic (Radius + Seats)
+                      var allAvailableRides = rideSnapshot.data!.docs.where((doc) {
+                        var data = doc.data() as Map<String, dynamic>;
+                        if ((data['available_seats'] ?? 0) < _passengers) return false;
+                        try {
+                          double dS = Geolocator.distanceBetween(_source['lat'], _source['lng'], data['source']['lat'], data['source']['lng']);
+                          double dD = Geolocator.distanceBetween(_destination['lat'], _destination['lng'], data['destination']['lat'], data['destination']['lng']);
+                          return dS <= 20000 && dD <= 20000;
+                        } catch (e) { return false; }
+                      }).toList();
+
+                      // Categorize Rides
+                      List<QueryDocumentSnapshot> exactRides = [];
+                      List<QueryDocumentSnapshot> otherRides = [];
+
+                      for (var ride in allAvailableRides) {
+                        DateTime rideDate = (ride['departure_time'] as Timestamp).toDate();
+                        if (rideDate.year == _date.year && rideDate.month == _date.month && rideDate.day == _date.day) {
+                          exactRides.add(ride);
+                        } else {
+                          otherRides.add(ride);
+                        }
+                      }
+
+                      exactRides.sort((a, b) => (a['departure_time'] as Timestamp).compareTo(b['departure_time']));
+                      otherRides.sort((a, b) => (a['departure_time'] as Timestamp).compareTo(b['departure_time']));
+
+                      if (exactRides.isEmpty && otherRides.isEmpty) return _buildEmpty();
+
+                      return ListView(
+                        padding: const EdgeInsets.symmetric(horizontal: 15),
+                        children: [
+                          if (exactRides.isNotEmpty) ...[
+                            _buildSectionHeader("Rides on ${DateFormat('EEEE, d MMM').format(_date)}"),
+                            ...exactRides.map((doc) {
+                              // CHECK IF BOOKED
+                              String? status = userBookings[doc.id];
+                              return _buildRideCard(doc.data() as Map<String, dynamic>, doc.id, bookingStatus: status);
+                            }).toList(),
+                          ],
+
+                          if (otherRides.isNotEmpty) ...[
+                            const SizedBox(height: 20),
+                            _buildSectionHeader("Available on other dates"),
+                            ...otherRides.map((doc) {
+                              String? status = userBookings[doc.id];
+                              return _buildRideCard(doc.data() as Map<String, dynamic>, doc.id, showFullDate: true, bookingStatus: status);
+                            }).toList(),
+                          ],
+                          const SizedBox(height: 30),
+                        ],
+                      );
                     },
                   );
                 },
@@ -239,121 +228,72 @@ class _RideResultsScreenState extends State<RideResultsScreen> {
     );
   }
 
-  Widget _buildRideCard(Map<String, dynamic> data, String docId) {
+  Widget _buildSectionHeader(String title) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 15, horizontal: 5),
+      child: Text(title, style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.grey.shade700)),
+    );
+  }
+
+  Widget _buildRideCard(Map<String, dynamic> data, String docId, {bool showFullDate = false, String? bookingStatus}) {
     DateTime dep = (data['departure_time'] as Timestamp).toDate();
+    bool isBooked = bookingStatus != null;
 
     return GestureDetector(
-      onTap: () {
-        // NAVIGATE TO RIDE VIEW SCREEN
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => RideViewScreen(
-              rideId: docId, 
-              rideData: data
-            ),
-          ),
-        );
-      },
+      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => RideViewScreen(rideId: docId, rideData: data))),
       child: Container(
         margin: const EdgeInsets.only(bottom: 12),
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
           color: Colors.white, 
-          borderRadius: BorderRadius.circular(15),
-          boxShadow: [
-            BoxShadow(color: Colors.grey.withOpacity(0.1), blurRadius: 5, offset: const Offset(0, 2))
-          ],
+          borderRadius: BorderRadius.circular(15), 
+          border: isBooked ? Border.all(color: primaryGreen.withOpacity(0.5), width: 2) : null,
+          boxShadow: [BoxShadow(color: Colors.grey.withOpacity(0.1), blurRadius: 5)]
         ),
         child: Column(
           children: [
-            // Time and Price
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
-                  DateFormat('h:mm a').format(dep), 
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: darkGreen)
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(DateFormat('h:mm a').format(dep), style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: darkGreen)),
+                    if (showFullDate)
+                      Text(DateFormat('EEE, d MMM').format(dep), style: TextStyle(fontSize: 12, color: primaryGreen, fontWeight: FontWeight.bold)),
+                  ],
                 ),
-                Text(
-                  "₹${data['price_per_seat']}", 
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: primaryGreen)
-                ),
+                // --- PRICE OR STATUS BADGE ---
+                if (isBooked)
+                   _statusBadge(bookingStatus!)
+                else
+                   Text("₹${data['price_per_seat']}", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: primaryGreen)),
               ],
             ),
             const SizedBox(height: 15),
-            
-            // Route Graphic
             Row(
               children: [
-                Column(
-                  children: [
-                    Icon(Icons.circle_outlined, size: 12, color: primaryGreen), 
-                    Container(height: 20, width: 2, color: Colors.grey[200]), 
-                    Icon(Icons.location_on, size: 12, color: primaryGreen)
-                  ]
-                ),
+                Column(children: [Icon(Icons.circle_outlined, size: 12, color: primaryGreen), Container(height: 20, width: 2, color: Colors.grey[200]), Icon(Icons.location_on, size: 12, color: primaryGreen)]),
                 const SizedBox(width: 15),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        data['source']['name'], 
-                        style: const TextStyle(fontWeight: FontWeight.bold),
-                        maxLines: 1, 
-                        overflow: TextOverflow.ellipsis
-                      ),
-                      const SizedBox(height: 15),
-                      Text(
-                        data['destination']['name'], 
-                        style: const TextStyle(fontWeight: FontWeight.bold),
-                        maxLines: 1, 
-                        overflow: TextOverflow.ellipsis
-                      ),
-                    ]
-                  ),
-                ),
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(data['source']['name'], style: const TextStyle(fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis), const SizedBox(height: 15), Text(data['destination']['name'], style: const TextStyle(fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis)])),
               ],
             ),
-            
             const Divider(height: 30),
-            
-            // Driver and Seats Footer
             Row(
               children: [
-                // --- DRIVER NAME ---
                 FutureBuilder<DocumentSnapshot>(
                   future: FirebaseFirestore.instance.collection('users').doc(data['driver_uid']).get(),
                   builder: (context, snap) {
-                    String name = "Driver";
-                    String? profilePic;
-                    
+                    String name = "Driver"; String? pic;
                     if (snap.hasData && snap.data!.exists) {
-                      var driverData = snap.data!.data() as Map<String, dynamic>;
-                      name = driverData['name'] ?? "Driver";
-                      profilePic = driverData['profile_pic'];
+                      var d = snap.data!.data() as Map<String, dynamic>;
+                      name = d['name'] ?? "Driver"; pic = d['profile_pic'];
                     }
-                    
-                    return Row(
-                      children: [
-                        CircleAvatar(
-                          radius: 12, 
-                          backgroundImage: profilePic != null ? NetworkImage(profilePic) : null,
-                          backgroundColor: Colors.grey[200],
-                          child: profilePic == null ? const Icon(Icons.person, size: 14) : null,
-                        ),
-                        const SizedBox(width: 8),
-                        Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                      ]
-                    );
+                    return Row(children: [CircleAvatar(radius: 12, backgroundImage: pic != null ? NetworkImage(pic) : null, backgroundColor: Colors.grey[200], child: pic == null ? const Icon(Icons.person, size: 14) : null), const SizedBox(width: 8), Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13))]);
                   },
                 ),
                 const Spacer(),
-                Text(
-                  "${data['available_seats']} seats left", 
-                  style: const TextStyle(color: Colors.orange, fontWeight: FontWeight.bold, fontSize: 12)
-                ),
+                Text("${data['available_seats']} seats left", style: const TextStyle(color: Colors.orange, fontWeight: FontWeight.bold, fontSize: 12)),
               ],
             )
           ],
@@ -362,18 +302,17 @@ class _RideResultsScreenState extends State<RideResultsScreen> {
     );
   }
 
-  Widget _buildEmpty() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.directions_car_outlined, size: 60, color: Colors.grey.shade300),
-          const SizedBox(height: 15),
-          const Text("No rides found", style: TextStyle(color: Colors.grey, fontSize: 16)),
-          const SizedBox(height: 5),
-          const Text("Try changing the date or location", style: TextStyle(color: Colors.grey, fontSize: 12)),
-        ],
-      ),
+  Widget _statusBadge(String status) {
+    Color color = status == 'accepted' ? Colors.green : Colors.orange;
+    String text = status == 'accepted' ? "BOOKED" : "REQUESTED";
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(10)),
+      child: Text(text, style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 12)),
     );
+  }
+
+  Widget _buildEmpty() {
+    return Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.directions_car_outlined, size: 60, color: Colors.grey.shade300), const SizedBox(height: 15), const Text("No rides found on this route", style: TextStyle(color: Colors.grey, fontSize: 16))]));
   }
 }

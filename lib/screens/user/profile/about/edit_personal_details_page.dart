@@ -3,8 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
-import 'package:image_picker/image_picker.dart'; // Required for picking images
-import '../../../../services/cloudinary_service.dart'; // Required for uploading
+import 'package:image_picker/image_picker.dart'; 
+import '../../../../services/cloudinary_service.dart'; 
 
 class EditPersonalDetailsPage extends StatefulWidget {
   final Map<String, dynamic> userData;
@@ -52,13 +52,35 @@ class _EditPersonalDetailsPageState extends State<EditPersonalDetailsPage> {
     }
   }
 
+  // --- UPDATED DATE SELECTION LOGIC (18+ RESTRICTION) ---
   Future<void> _selectDate() async {
+    final DateTime now = DateTime.now();
+    // Calculate the date exactly 18 years ago from today
+    final DateTime lastAllowedDate = DateTime(now.year - 18, now.month, now.day);
+
+    // Try to parse existing DOB to set as initial focus, otherwise default to 2000
+    DateTime initialDate = DateTime(2000);
+    if (_dob != null && _dob!.isNotEmpty) {
+      try {
+        initialDate = DateFormat('dd-MM-yyyy').parse(_dob!);
+      } catch (e) {
+        // use default if parse fails
+      }
+    }
+
+    // Ensure initialDate isn't "younger" than the limit (prevents crash)
+    if (initialDate.isAfter(lastAllowedDate)) {
+      initialDate = lastAllowedDate;
+    }
+
     DateTime? picked = await showDatePicker(
       context: context,
-      initialDate: DateTime(2000),
-      firstDate: DateTime(1950),
-      lastDate: DateTime.now(),
+      initialDate: initialDate,
+      firstDate: DateTime(1900), // Allow older birth years
+      lastDate: lastAllowedDate, // This enforces the 18+ limit
+      helpText: "SELECT DATE OF BIRTH (MUST BE 18+)", // UX Hint
     );
+
     if (picked != null) {
       setState(() => _dob = DateFormat('dd-MM-yyyy').format(picked));
     }
@@ -66,6 +88,14 @@ class _EditPersonalDetailsPageState extends State<EditPersonalDetailsPage> {
 
   Future<void> _saveChanges() async {
     if (!_formKey.currentState!.validate()) return;
+
+    // Extra validation check before saving
+    if (_dob == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Please select your Date of Birth")),
+      );
+      return;
+    }
 
     setState(() => _isLoading = true);
     
@@ -189,10 +219,13 @@ class _EditPersonalDetailsPageState extends State<EditPersonalDetailsPage> {
               _buildField("Last Name", _lastNameController),
               const SizedBox(height: 20),
               
-              const Text("Date of Birth", style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold)),
+              const Text("Date of Birth (18+)", style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold)),
               ListTile(
                 contentPadding: EdgeInsets.zero,
-                title: Text(_dob ?? "Select Date"),
+                title: Text(
+                  _dob ?? "Select Date",
+                  style: TextStyle(color: _dob == null ? Colors.grey : Colors.black),
+                ),
                 trailing: const Icon(Icons.calendar_month),
                 onTap: _selectDate,
               ),
