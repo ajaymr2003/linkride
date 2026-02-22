@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../admin/admin_dashboard.dart';
 import '../user/dashboard/user_dashboard.dart';
 import 'pin_setup_screen.dart';
@@ -29,19 +31,53 @@ class _LoginPasswordScreenState extends State<LoginPasswordScreen> {
       context: context,
       builder: (context) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-        title: const Text("Login Issue", style: TextStyle(fontWeight: FontWeight.bold)),
+        title: const Text(
+          "Login Issue",
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
         content: Text(message),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: Text("OK", style: TextStyle(color: primaryGreen, fontWeight: FontWeight.bold)),
+            child: Text(
+              "OK",
+              style: TextStyle(
+                color: primaryGreen,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
           ),
         ],
       ),
     );
   }
 
-// --- LOGIN LOGIC ---
+  // --- REQUEST NOTIFICATION PERMISSION ---
+  Future<void> _requestNotificationPermission() async {
+    final status = await Permission.notification.request();
+    debugPrint("Notification permission status: $status");
+  }
+
+  // --- GET FCM TOKEN WITH RETRY ---
+  Future<String?> _getFCMTokenWithRetry({int maxRetries = 3}) async {
+    for (int i = 0; i < maxRetries; i++) {
+      try {
+        final token = await FirebaseMessaging.instance.getToken();
+        if (token != null) {
+          return token;
+        }
+        debugPrint("FCM Token attempt ${i + 1}: null, retrying...");
+      } catch (e) {
+        debugPrint("FCM Token attempt ${i + 1} failed: $e");
+        if (i < maxRetries - 1) {
+          await Future.delayed(const Duration(milliseconds: 500));
+        }
+      }
+    }
+    return null;
+  }
+
+  // --- LOGIN LOGIC ---
   Future<void> _login() async {
     final password = _passController.text.trim();
     if (password.isEmpty) {
@@ -52,56 +88,78 @@ class _LoginPasswordScreenState extends State<LoginPasswordScreen> {
     setState(() => _isLoading = true);
 
     try {
-      // 1. SIGN IN WITH FIREBASE (This saves the session!)
-      UserCredential userCred = await FirebaseAuth.instance.signInWithEmailAndPassword(
-        email: widget.email,
-        password: password,
-      );
+      // 1. SIGN IN WITH FIREBASE
+      UserCredential userCred = await FirebaseAuth.instance
+          .signInWithEmailAndPassword(email: widget.email, password: password);
 
       // 2. CHECK IF ADMIN
       if (userCred.user!.email == "admin@gmail.com") {
         setState(() => _isLoading = false);
         Navigator.pushAndRemoveUntil(
-          context, 
-          MaterialPageRoute(builder: (_) => const AdminDashboard()), 
-          (r) => false
+          context,
+          MaterialPageRoute(builder: (_) => const AdminDashboard()),
+          (r) => false,
         );
-        return; 
+        return;
       }
 
       // 3. REGULAR USER: CHECK FIRESTORE
-      // We only check Firestore if it's NOT the admin
       DocumentSnapshot userDoc = await FirebaseFirestore.instance
           .collection('users')
           .doc(userCred.user!.uid)
           .get();
 
       if (!userDoc.exists) {
-        // User exists in Auth, but the document in Firestore was deleted
         await FirebaseAuth.instance.signOut();
         _showErrorPopup("This account has been disabled or deleted.");
         setState(() => _isLoading = false);
         return;
       }
 
-      // 4. FETCH SETUP FLAGS
+      // --- 4. UPDATE FCM TOKEN (NEW LOGIC) ---
+      try {
+        // Request notification permission first (Android 13+)
+        await _requestNotificationPermission();
+
+        // Get FCM token with retry logic
+        String? fcmToken = await _getFCMTokenWithRetry();
+        if (fcmToken != null) {
+          await FirebaseFirestore.instance
+              .collection('users')
+              .doc(userCred.user!.uid)
+              .update({'fcm_token': fcmToken});
+          debugPrint("FCM Token updated successfully: $fcmToken");
+        } else {
+          debugPrint("FCM Token is null");
+        }
+      } catch (e) {
+        debugPrint("FCM Token Error: $e");
+        // Don't stop login flow, FCM is optional
+      }
+      // ---------------------------------------
+
+      // 5. FETCH SETUP FLAGS
       Map<String, dynamic> userData = userDoc.data() as Map<String, dynamic>;
       bool pinSetup = userData['pin_setup_completed'] ?? false;
       bool guardianSetup = userData['guardian_details_completed'] ?? false;
 
       if (!mounted) return;
 
-      // 5. REDIRECTION LOGIC
+      // 6. REDIRECTION LOGIC
       if (!pinSetup) {
         Navigator.pushAndRemoveUntil(
           context,
-          MaterialPageRoute(builder: (_) => PinSetupScreen(userId: userCred.user!.uid)),
+          MaterialPageRoute(
+            builder: (_) => PinSetupScreen(userId: userCred.user!.uid),
+          ),
           (r) => false,
         );
       } else if (!guardianSetup) {
         Navigator.pushAndRemoveUntil(
           context,
-          MaterialPageRoute(builder: (_) => GuardianDetailsScreen(userId: userCred.user!.uid)),
+          MaterialPageRoute(
+            builder: (_) => GuardianDetailsScreen(userId: userCred.user!.uid),
+          ),
           (r) => false,
         );
       } else {
@@ -151,8 +209,7 @@ class _LoginPasswordScreenState extends State<LoginPasswordScreen> {
                 style: TextStyle(color: Colors.grey.shade600, fontSize: 15),
               ),
               const SizedBox(height: 40),
-              
-              // Password Field
+
               TextFormField(
                 controller: _passController,
                 obscureText: !_isPasswordVisible,
@@ -162,10 +219,14 @@ class _LoginPasswordScreenState extends State<LoginPasswordScreen> {
                   prefixIcon: const Icon(Icons.lock_outline),
                   suffixIcon: IconButton(
                     icon: Icon(
-                      _isPasswordVisible ? Icons.visibility : Icons.visibility_off,
+                      _isPasswordVisible
+                          ? Icons.visibility
+                          : Icons.visibility_off,
                       color: Colors.grey,
                     ),
-                    onPressed: () => setState(() => _isPasswordVisible = !_isPasswordVisible),
+                    onPressed: () => setState(
+                      () => _isPasswordVisible = !_isPasswordVisible,
+                    ),
                   ),
                   filled: true,
                   fillColor: Colors.grey[100],
@@ -176,7 +237,6 @@ class _LoginPasswordScreenState extends State<LoginPasswordScreen> {
                 ),
               ),
 
-              // Forgot Password (only for regular users)
               if (!isAdmin)
                 Align(
                   alignment: Alignment.centerRight,
@@ -185,20 +245,23 @@ class _LoginPasswordScreenState extends State<LoginPasswordScreen> {
                       Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (_) => ForgotPasswordScreen(email: widget.email),
+                          builder: (_) =>
+                              ForgotPasswordScreen(email: widget.email),
                         ),
                       );
                     },
                     child: Text(
                       "Forgot Password?",
-                      style: TextStyle(color: primaryGreen, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                        color: primaryGreen,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                 ),
 
               const SizedBox(height: 100),
-              
-              // Action Button
+
               SizedBox(
                 width: double.infinity,
                 height: 55,
@@ -206,7 +269,9 @@ class _LoginPasswordScreenState extends State<LoginPasswordScreen> {
                   onPressed: _isLoading ? null : _login,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: primaryGreen,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(15),
+                    ),
                     elevation: 0,
                   ),
                   child: _isLoading

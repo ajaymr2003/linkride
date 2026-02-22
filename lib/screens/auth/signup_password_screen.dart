@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_messaging/firebase_messaging.dart'; // <--- IMPORT ADDED
 import 'pin_setup_screen.dart';
 
 class SignupPasswordScreen extends StatefulWidget {
@@ -63,7 +64,16 @@ class _SignupPasswordScreenState extends State<SignupPasswordScreen> {
             password: _passController.text.trim(),
           );
 
-      // 2. Save Details to Firestore
+      // --- 2. GET FCM TOKEN (NEW LOGIC) ---
+      String? fcmToken;
+      try {
+        fcmToken = await FirebaseMessaging.instance.getToken();
+      } catch (e) {
+        debugPrint("Error fetching FCM token during signup: $e");
+      }
+      // ------------------------------------
+
+      // 3. Save Details to Firestore (Include Token)
       await FirebaseFirestore.instance
           .collection('users')
           .doc(userCred.user!.uid)
@@ -72,14 +82,15 @@ class _SignupPasswordScreenState extends State<SignupPasswordScreen> {
             'name': widget.name,
             'email': widget.email,
             'phone': widget.phone,
+            'fcm_token': fcmToken, // <--- SAVING TOKEN HERE
             'createdAt': FieldValue.serverTimestamp(),
-            'pin_setup_completed': false, // Default false
-            'guardian_details_completed': false, // Default false
+            'pin_setup_completed': false, 
+            'guardian_details_completed': false, 
           });
 
       if (!mounted) return;
 
-      // 3. REDIRECT TO PIN SETUP (Not Dashboard)
+      // 4. REDIRECT TO PIN SETUP
       Navigator.pushAndRemoveUntil(
         context,
         MaterialPageRoute(
@@ -150,7 +161,7 @@ class _SignupPasswordScreenState extends State<SignupPasswordScreen> {
                     borderRadius: BorderRadius.circular(12),
                     borderSide: BorderSide.none,
                   ),
-                  errorMaxLines: 2, // Allows long error messages to wrap
+                  errorMaxLines: 2, 
                 ),
               ),
 
