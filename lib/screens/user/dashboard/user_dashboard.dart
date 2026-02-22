@@ -6,9 +6,9 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:geolocator/geolocator.dart';
 
 // Screens
-import 'home_mode_selection.dart';
-import 'rides_page.dart';
-import 'inbox_page.dart';
+import 'home/home_mode_selection.dart';
+import 'activity/rides_page.dart';
+import 'inbox/inbox_page.dart';
 import '../profile/account/account_page.dart';
 
 class UserDashboard extends StatefulWidget {

@@ -3,8 +3,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
 
-import '../driver/ride_steps/step_1_location.dart';
-import '../driver/ride_steps/step_2_destination.dart';
+import '../../driver/ride_steps/step_1_location.dart';
+import '../../driver/ride_steps/step_2_destination.dart';
 
 class EditRidePage extends StatefulWidget {
   final String docId;

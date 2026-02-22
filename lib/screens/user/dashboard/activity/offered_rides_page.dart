@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
-import 'edit_ride_page.dart';
-import 'package:linkride/screens/user/dashboard/edit_ride_page.dart';
+import '../home/edit_ride_page.dart';
+import 'package:linkride/screens/user/dashboard/home/edit_ride_page.dart';
 
 class OfferedRidesPage extends StatefulWidget {
   const OfferedRidesPage({super.key});

@@ -1,11 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import '../passenger/search_ride.dart';
+
+// Existing Imports
+import '../../passenger/search_ride.dart';
 import 'driver_dashboard.dart';
-import '../driver_setup/driver_setup_controller.dart';
-import 'inbox_page.dart';
-import 'ride_live_tracking_page.dart'; // Ensure this file is created
+import '../../driver_setup/driver_setup_controller.dart';
+import '../inbox/inbox_page.dart';
+
+// NEW SPLIT RIDE IMPORTS
+import '/screens/ride/driver/driver_live_tracking.dart';
+
+//  /screens/ride/driver/driver_live_tracking.dart';
+import '/screens/ride/passenger/passenger_live_tracking.dart';
 
 // Enum to track what the Home Tab is currently showing
 enum HomeViewState { selection, passenger, driver }
@@ -131,7 +138,6 @@ class _HomeModeSelectionState extends State<HomeModeSelection> {
 
       case HomeViewState.selection:
       default:
-        // MODIFIED: Added Banner at the top of the Selection View
         return Column(
           children: [
             _buildActiveRideBanner(),
@@ -214,7 +220,7 @@ class _HomeModeSelectionState extends State<HomeModeSelection> {
     );
   }
 
-  // --- NEW: TODAY'S ACTIVE RIDE BANNER ---
+  // --- UPDATED: TODAY'S ACTIVE RIDE BANNER WITH SPLIT NAVIGATION ---
   Widget _buildActiveRideBanner() {
     final String uid = FirebaseAuth.instance.currentUser?.uid ?? "";
     final now = DateTime.now();
@@ -241,12 +247,24 @@ class _HomeModeSelectionState extends State<HomeModeSelection> {
 
         var rideData = myRideDoc.first.data() as Map<String, dynamic>;
         var rideId = myRideDoc.first.id;
+        
+        // CHECK ROLE
+        bool isDriver = rideData['driver_uid'] == uid;
 
         return GestureDetector(
-          onTap: () => Navigator.push(
-            context, 
-            MaterialPageRoute(builder: (_) => RideLiveTrackingPage(rideData: rideData, rideId: rideId))
-          ),
+          onTap: () {
+            if (isDriver) {
+              Navigator.push(
+                context, 
+                MaterialPageRoute(builder: (_) => DriverLiveTracking(rideData: rideData, rideId: rideId))
+              );
+            } else {
+              Navigator.push(
+                context, 
+                MaterialPageRoute(builder: (_) => PassengerLiveTracking(rideData: rideData, rideId: rideId))
+              );
+            }
+          },
           child: Container(
             margin: const EdgeInsets.fromLTRB(20, 10, 20, 0),
             padding: const EdgeInsets.all(15),

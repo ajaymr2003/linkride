@@ -3,10 +3,10 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
 
-import '../driver_setup/driver_setup_controller.dart';
-import '../driver/ride_setup.dart';
+import '../../driver_setup/driver_setup_controller.dart';
+import '../../driver/ride_setup.dart';
 import 'edit_ride_page.dart';
-import '../driver/ride_requests_page.dart';
+import '../../driver/ride_requests_page.dart';
 
 class DriverDashboard extends StatelessWidget {
   final VoidCallback? onBack;
