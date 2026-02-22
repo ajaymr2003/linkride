@@ -1,17 +1,26 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- 1. PERMISSIONS (Already correct) -->
+    <!-- 1. PERMISSIONS -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Required for background tracking if you want it to work while screen is off -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
 
     <application
         android:label="linkride"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
+
+        <!-- 2. FCM Notification Channel Metadata (Crucial for popups) -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="high_importance_channel" />
 
         <!-- MAIN ACTIVITY -->
         <activity
@@ -41,7 +50,7 @@
             android:screenOrientation="portrait"
             android:theme="@style/Theme.AppCompat.Light.NoActionBar" />
 
-        <!-- 2. ADD THIS: ML Kit Face Detection Model Downloader -->
+        <!-- ML Kit Face Detection -->
         <meta-data
             android:name="com.google.mlkit.vision.DEPENDENCIES"
             android:value="face" />

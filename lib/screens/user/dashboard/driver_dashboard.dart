@@ -5,7 +5,7 @@ import 'package:intl/intl.dart';
 
 import '../driver_setup/driver_setup_controller.dart';
 import '../driver/ride_setup.dart';
-import '../driver/ride_steps/edit_ride_page.dart';
+import 'edit_ride_page.dart';
 import '../driver/ride_requests_page.dart';
 
 class DriverDashboard extends StatelessWidget {

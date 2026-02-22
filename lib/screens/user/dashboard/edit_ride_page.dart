@@ -3,8 +3,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
 
-import 'step_1_location.dart';
-import 'step_2_destination.dart';
+import '../driver/ride_steps/step_1_location.dart';
+import '../driver/ride_steps/step_2_destination.dart';
 
 class EditRidePage extends StatefulWidget {
   final String docId;
@@ -111,6 +111,27 @@ class _EditRidePageState extends State<EditRidePage> {
     }
   }
 
+  // FIXED DATE PICKER LOGIC
+  Future<void> _handleDatePicker() async {
+    DateTime now = DateTime.now();
+    DateTime todayMidnight = DateTime(now.year, now.month, now.day);
+    
+    // CRASH FIX: If the ride date is in the past, let the firstDate be that date.
+    // Otherwise, the firstDate is today.
+    DateTime firstAllowedDate = _selectedDate.isBefore(todayMidnight) 
+        ? _selectedDate 
+        : todayMidnight;
+
+    final d = await showDatePicker(
+      context: context, 
+      initialDate: _selectedDate, 
+      firstDate: firstAllowedDate, 
+      lastDate: DateTime.now().add(const Duration(days: 90))
+    );
+    
+    if (d != null) setState(() => _selectedDate = d);
+  }
+
   Future<void> _updateRide() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _isLoading = true);
@@ -160,7 +181,6 @@ class _EditRidePageState extends State<EditRidePage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // --- NEW: REQUESTS BUTTON ---
               _buildRequestSummary(),
               const SizedBox(height: 20),
 
@@ -173,10 +193,7 @@ class _EditRidePageState extends State<EditRidePage> {
               _buildSectionTitle("DATE & TIME"),
               Row(
                 children: [
-                  Expanded(child: _pickerTile(DateFormat('dd MMM, yyyy').format(_selectedDate), Icons.calendar_today, () async {
-                    final d = await showDatePicker(context: context, initialDate: _selectedDate, firstDate: DateTime.now(), lastDate: DateTime.now().add(const Duration(days: 90)));
-                    if (d != null) setState(() => _selectedDate = d);
-                  })),
+                  Expanded(child: _pickerTile(DateFormat('dd MMM, yyyy').format(_selectedDate), Icons.calendar_today, _handleDatePicker)),
                   const SizedBox(width: 15),
                   Expanded(child: _pickerTile(_selectedTime.format(context), Icons.access_time, () async {
                     final t = await showTimePicker(context: context, initialTime: _selectedTime);
@@ -191,18 +208,34 @@ class _EditRidePageState extends State<EditRidePage> {
                 stream: FirebaseFirestore.instance.collection('users').doc(FirebaseAuth.instance.currentUser!.uid).collection('vehicles').snapshots(),
                 builder: (context, snap) {
                   if (!snap.hasData) return const LinearProgressIndicator();
+                  
+                  // FIX: Added null safety check for fields
                   List<Map<String, dynamic>> vehicles = snap.data!.docs.map((d) => d.data() as Map<String, dynamic>).toList();
+                  
                   Map<String, dynamic>? currentValue;
                   if (_selectedVehicle != null) {
-                    try { currentValue = vehicles.firstWhere((v) => v['plate'] == _selectedVehicle?['plate']); } catch (e) { currentValue = null; }
+                    try { 
+                      currentValue = vehicles.firstWhere((v) => (v['plate'] ?? '') == _selectedVehicle?['plate']); 
+                    } catch (e) { 
+                      currentValue = null; 
+                    }
                   }
+                  
                   return Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                     decoration: BoxDecoration(color: Colors.grey[100], borderRadius: BorderRadius.circular(12)),
                     child: DropdownButtonHideUnderline(
                       child: DropdownButton<Map<String, dynamic>>(
-                        isExpanded: true, value: currentValue, hint: const Text("Select Vehicle"),
-                        items: vehicles.map((v) => DropdownMenuItem(value: v, child: Text("${v['brand']} ${v['model']} (${v['plate']})"))).toList(),
+                        isExpanded: true, 
+                        value: currentValue, 
+                        hint: const Text("Select Vehicle"),
+                        items: vehicles.map((v) {
+                          // FIX: Access fields safely
+                          String brand = v['brand'] ?? "Unknown";
+                          String model = v['model'] ?? "Vehicle";
+                          String plate = v['plate'] ?? "No Plate";
+                          return DropdownMenuItem(value: v, child: Text("$brand $model ($plate)"));
+                        }).toList(),
                         onChanged: (val) => setState(() => _selectedVehicle = val),
                       ),
                     ),
@@ -244,7 +277,6 @@ class _EditRidePageState extends State<EditRidePage> {
     );
   }
 
-  // Widget to show number of pending requests and button
   Widget _buildRequestSummary() {
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
@@ -395,7 +427,6 @@ class RideBookingsScreen extends StatelessWidget {
   Future<void> _handleStatus(BuildContext context, String bookingId, String rId, String status) async {
     try {
       if (status == 'accepted') {
-        // Run a transaction to ensure we don't overbook
         await FirebaseFirestore.instance.runTransaction((transaction) async {
           DocumentReference rideRef = FirebaseFirestore.instance.collection('rides').doc(rId);
           DocumentSnapshot rideSnap = await transaction.get(rideRef);

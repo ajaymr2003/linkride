@@ -2,8 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'driver_approval_screen.dart';
 import 'user_management_screen.dart';
-// If you have a specific screen for active rides, import it. 
-// Otherwise, we use a placeholder.
+import 'active_rides_page.dart'; // 1. ADD THIS IMPORT
 
 class AdminHomePage extends StatelessWidget {
   const AdminHomePage({super.key});
@@ -27,7 +26,6 @@ class AdminHomePage extends StatelessWidget {
         foregroundColor: darkGreen,
         elevation: 0,
         actions: [
-          // --- NOTIFICATION ICON ---
           Stack(
             alignment: Alignment.center,
             children: [
@@ -63,11 +61,8 @@ class AdminHomePage extends StatelessWidget {
           children: [
             const Text("Quick Stats", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 15),
-
-            // --- CLICKABLE BANNERS GRID ---
             Row(
               children: [
-                // 1. Total Users Banner
                 Expanded(
                   child: _buildLiveStatCard(
                     context,
@@ -79,7 +74,6 @@ class AdminHomePage extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 15),
-                // 2. Pending Drivers Banner
                 Expanded(
                   child: _buildLiveStatCard(
                     context,
@@ -96,17 +90,14 @@ class AdminHomePage extends StatelessWidget {
             ),
             
             const SizedBox(height: 25),
-            
-            // --- ACTIVE RIDES BUTTON (LARGE BANNER) ---
             const Text("Operations", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 15),
             
+            // --- CONNECTED: ACTIVE RIDES BUTTON ---
             InkWell(
               onTap: () {
-                 // Navigate to Active Rides Screen (Placeholder logic)
-                 ScaffoldMessenger.of(context).showSnackBar(
-                   const SnackBar(content: Text("Opening Active Rides Monitor...")),
-                 );
+                 // 2. UPDATED NAVIGATION
+                 Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminActiveRidesPage()));
               },
               child: Container(
                 width: double.infinity,
@@ -148,8 +139,6 @@ class AdminHomePage extends StatelessWidget {
             ),
 
             const SizedBox(height: 25),
-
-            // --- RECENT ACTIVITY LIST (Visual Filler) ---
             const Text("System Health", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 15),
             _buildInfoTile(Icons.check_circle, Colors.green, "Server Status", "Online and stable"),
@@ -161,7 +150,6 @@ class AdminHomePage extends StatelessWidget {
     );
   }
 
-  // --- WIDGET BUILDER: LIVE STAT CARD ---
   Widget _buildLiveStatCard(BuildContext context, {
     required String title,
     required IconData icon,
@@ -171,7 +159,6 @@ class AdminHomePage extends StatelessWidget {
     String? queryValue,
     required VoidCallback onTap,
   }) {
-    // Determine the query
     Query query = FirebaseFirestore.instance.collection(collection);
     if (queryField != null && queryValue != null) {
       query = query.where(queryField, isEqualTo: queryValue);
@@ -216,15 +203,9 @@ class AdminHomePage extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 15),
-                Text(
-                  count,
-                  style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.grey.shade800),
-                ),
+                Text(count, style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.grey.shade800)),
                 const SizedBox(height: 5),
-                Text(
-                  title,
-                  style: TextStyle(fontSize: 14, color: Colors.grey.shade500, fontWeight: FontWeight.w500),
-                ),
+                Text(title, style: TextStyle(fontSize: 14, color: Colors.grey.shade500, fontWeight: FontWeight.w500)),
               ],
             ),
           ),
@@ -233,15 +214,11 @@ class AdminHomePage extends StatelessWidget {
     );
   }
 
-  // --- WIDGET BUILDER: INFO TILE ---
   Widget _buildInfoTile(IconData icon, Color color, String title, String subtitle) {
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(15),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(15),
-      ),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(15)),
       child: Row(
         children: [
           Icon(icon, color: color),

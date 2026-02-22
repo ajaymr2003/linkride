@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:http/http.dart' as http;
+import '../../../services/fcm_service.dart'; // Ensure this path is correct
 
 class RideViewScreen extends StatefulWidget {
   final String rideId;
@@ -105,34 +106,67 @@ class _RideViewScreenState extends State<RideViewScreen> {
     }
   }
 
+  // --- UPDATED: SEND REQUEST WITH NOTIFICATIONS ---
   Future<void> _sendRequest() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
     setState(() => _isRequesting = true);
     try {
-      DocumentSnapshot userDoc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
-      String actualName = userDoc.exists ? (userDoc.get('name') ?? "Passenger") : "Passenger";
+      // 1. Fetch Passenger name and Driver token
+      DocumentSnapshot passengerDoc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+      DocumentSnapshot driverDoc = await FirebaseFirestore.instance.collection('users').doc(widget.rideData['driver_uid']).get();
+      
+      String passengerName = passengerDoc.exists ? (passengerDoc.get('name') ?? "A passenger") : "A passenger";
+      String? driverToken = driverDoc.exists ? driverDoc.get('fcm_token') : null;
+      String destination = widget.rideData['destination']['name'] ?? "Destination";
 
-      await FirebaseFirestore.instance.collection('bookings').add({
-        'ride_id': widget.rideId,
-        'passenger_uid': user.uid,
-        'passenger_name': actualName,
-        'driver_uid': widget.rideData['driver_uid'],
-        'status': 'pending',
-        'created_at': FieldValue.serverTimestamp(),
-        'price': widget.rideData['price_per_seat'],
-        'source': widget.rideData['source'],
-        'destination': widget.rideData['destination'],
-        'ride_date': widget.rideData['departure_time'],
+      // 2. Transaction: Create Booking AND In-App Notification
+      await FirebaseFirestore.instance.runTransaction((transaction) async {
+        // A. Create the Booking
+        DocumentReference bookingRef = FirebaseFirestore.instance.collection('bookings').doc();
+        transaction.set(bookingRef, {
+          'ride_id': widget.rideId,
+          'passenger_uid': user.uid,
+          'passenger_name': passengerName,
+          'driver_uid': widget.rideData['driver_uid'],
+          'driver_name': driverDoc.get('name') ?? "Driver",
+          'status': 'pending',
+          'created_at': FieldValue.serverTimestamp(),
+          'price': widget.rideData['price_per_seat'],
+          'source': widget.rideData['source'],
+          'destination': widget.rideData['destination'],
+          'ride_date': widget.rideData['departure_time'],
+        });
+
+        // B. Create In-App Notification for the Driver
+        DocumentReference notifRef = FirebaseFirestore.instance.collection('notifications').doc();
+        transaction.set(notifRef, {
+          'uid': widget.rideData['driver_uid'],
+          'title': 'New Ride Request! 📩',
+          'message': '$passengerName requested a seat for your trip to $destination.',
+          'type': 'new_request',
+          'timestamp': FieldValue.serverTimestamp(),
+          'isRead': false,
+        });
       });
 
+      // 3. Trigger Push Notification to Driver phone
+      if (driverToken != null && driverToken.isNotEmpty) {
+        FCMService.sendPushNotification(
+          token: driverToken,
+          title: "New Ride Request! 📩",
+          body: "$passengerName wants to join your ride to $destination.",
+        );
+      }
+
       if (mounted) {
+        setState(() => _existingStatus = 'pending'); // Update button text immediately
         showDialog(
           context: context,
           builder: (ctx) => AlertDialog(
             title: const Text("Request Sent"),
-            content: const Text("The driver will review your request."),
+            content: const Text("The driver has been notified and will review your request."),
             actions: [TextButton(onPressed: () { Navigator.pop(ctx); Navigator.pop(context); }, child: const Text("OK"))],
           ),
         );
