@@ -24,130 +24,204 @@ class DriverLiveTracking extends StatefulWidget {
 class _DriverLiveTrackingState extends State<DriverLiveTracking> {
   final MapController _mapController = MapController();
   final String _myUid = FirebaseAuth.instance.currentUser!.uid;
-  
-  LatLng? _myPos;
-  LatLng? _passengerPos;
-  List<LatLng> _routePoints = [];
-  String? _passengerUid;
-  String _passengerName = "Passenger";
-  bool _passengerOnline = false;
 
-  final Color primaryGreen = const Color(0xFF11A860);
-  StreamSubscription<Position>? _positionStream;
+  LatLng? _driverCurrentPos; 
+  LatLng? _targetPos;        
+  List<LatLng> _routePoints = [];
+
+  String _distance = "--";
+  String _duration = "--";
+
+  StreamSubscription<DatabaseEvent>? _driverLocationSub;
+  bool _isMapReady = false;
 
   @override
   void initState() {
     super.initState();
-    _passengerUid = (widget.rideData['passengers'] as List).first.toString();
-    _fetchPassengerName();
-    _startBroadcasting();
-    _listenToPassenger();
+    _listenToMyMovingLocation();
   }
 
-  void _startBroadcasting() {
-    _positionStream = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(accuracy: LocationAccuracy.bestForNavigation, distanceFilter: 5)
-    ).listen((pos) {
-      if (mounted) {
-        setState(() => _myPos = LatLng(pos.latitude, pos.longitude));
-        FirebaseDatabase.instance.ref('user_locations/$_myUid').update({
-          'lat': pos.latitude, 'lng': pos.longitude, 'is_active': true, 'last_updated': ServerValue.timestamp,
-        });
-      }
-    });
+  // --- 1. AUTO-ZOOM LOGIC ---
+  void _fitMap() {
+    if (!_isMapReady || _driverCurrentPos == null || _targetPos == null) return;
+
+    // Create bounds that include both the Driver and the Target
+    var bounds = LatLngBounds.fromPoints([_driverCurrentPos!, _targetPos!]);
+
+    // Adjust camera to fit both points with padding
+    _mapController.fitCamera(
+      CameraFit.bounds(
+        bounds: bounds, 
+        padding: const EdgeInsets.symmetric(vertical: 80, horizontal: 50),
+      ),
+    );
   }
 
-  void _listenToPassenger() {
-    FirebaseDatabase.instance.ref('user_locations/$_passengerUid').onValue.listen((event) {
+  void _listenToMyMovingLocation() {
+    _driverLocationSub = FirebaseDatabase.instance.ref('user_locations/$_myUid').onValue.listen((event) {
       if (event.snapshot.value == null) return;
+      
       final data = Map<dynamic, dynamic>.from(event.snapshot.value as Map);
+      LatLng newPos = LatLng(data['lat'], data['lng']);
+
       if (mounted) {
-        setState(() {
-          _passengerOnline = data['is_active'] ?? false;
-          _passengerPos = LatLng(data['lat'], data['lng']);
-        });
-        _fetchRoute();
+        setState(() => _driverCurrentPos = newPos);
+
+        // Recalculate road route and zoom every time the driver moves
+        if (_targetPos != null) {
+          _fetchRoadRoute(_driverCurrentPos!, _targetPos!);
+          _fitMap(); // <--- Update zoom
+        }
       }
     });
   }
 
-  Future<void> _fetchRoute() async {
-    if (_myPos == null || _passengerPos == null) return;
-    final url = Uri.parse('http://router.project-osrm.org/route/v1/driving/${_myPos!.longitude},${_myPos!.latitude};${_passengerPos!.longitude},${_passengerPos!.latitude}?overview=full&geometries=geojson');
-    final response = await http.get(url);
-    if (response.statusCode == 200) {
-      final data = jsonDecode(response.body);
-      setState(() {
-        _routePoints = (data['routes'][0]['geometry']['coordinates'] as List).map((c) => LatLng(c[1], c[0])).toList();
-      });
-    }
-  }
+  Future<void> _fetchRoadRoute(LatLng start, LatLng end) async {
+    final url = Uri.parse(
+        'http://router.project-osrm.org/route/v1/driving/${start.longitude},${start.latitude};${end.longitude},${end.latitude}?overview=full&geometries=geojson');
 
-  Future<void> _fetchPassengerName() async {
-    var doc = await FirebaseFirestore.instance.collection('users').doc(_passengerUid).get();
-    if (doc.exists) setState(() => _passengerName = doc.get('name').split(' ')[0]);
+    try {
+      final response = await http.get(url);
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final route = data['routes'][0];
+
+        if (mounted) {
+          setState(() {
+            _routePoints = (route['geometry']['coordinates'] as List)
+                .map((c) => LatLng(c[1], c[0]))
+                .toList();
+            _distance = "${(route['distance'] / 1000).toStringAsFixed(1)} km";
+            _duration = "${(route['duration'] / 60).toStringAsFixed(0)} min";
+          });
+        }
+      }
+    } catch (e) {}
   }
 
   @override
   void dispose() {
-    _positionStream?.cancel();
-    FirebaseDatabase.instance.ref('user_locations/$_myUid').update({'is_active': false});
+    _driverLocationSub?.cancel();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Stack(
-        children: [
-          FlutterMap(
-            mapController: _mapController,
-            options: MapOptions(initialCenter: _myPos ?? const LatLng(11.25, 75.78), initialZoom: 15),
+      body: StreamBuilder<DocumentSnapshot>(
+        stream: FirebaseFirestore.instance.collection('rides').doc(widget.rideId).snapshots(),
+        builder: (context, snapshot) {
+          if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+
+          var ride = snapshot.data!.data() as Map<String, dynamic>;
+          List passengers = ride['passengers'] ?? [];
+          bool hasPassenger = passengers.isNotEmpty;
+          String? pUid;
+
+          if (hasPassenger) {
+            pUid = passengers.first.toString();
+            var pRoute = ride['passenger_routes'][pUid]['pickup'];
+            _targetPos = LatLng(pRoute['lat'], pRoute['lng']);
+          } else {
+            _targetPos = LatLng(ride['destination']['lat'], ride['destination']['lng']);
+          }
+
+          return Stack(
             children: [
-              TileLayer(urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png'),
-              if (_routePoints.isNotEmpty) PolylineLayer(polylines: [Polyline(points: _routePoints, color: Colors.blue, strokeWidth: 5)]),
-              MarkerLayer(markers: [
-                if (_myPos != null) Marker(point: _myPos!, child: const Icon(Icons.directions_car, color: Colors.blue, size: 30)),
-                if (_passengerPos != null) Marker(point: _passengerPos!, child: const Icon(Icons.person_pin_circle, color: Colors.orange, size: 35)),
-              ]),
-            ],
-          ),
-          Positioned(top: 50, left: 20, child: CircleAvatar(backgroundColor: Colors.white, child: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => Navigator.pop(context)))),
-          
-          Positioned(
-            bottom: 0, left: 0, right: 0,
-            child: Container(
-              padding: const EdgeInsets.all(25),
-              decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(30))),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
+              FlutterMap(
+                mapController: _mapController,
+                options: MapOptions(
+                  initialCenter: _driverCurrentPos ?? const LatLng(11.2, 75.7),
+                  initialZoom: 14,
+                  onMapReady: () {
+                    setState(() => _isMapReady = true);
+                    _fitMap();
+                  },
+                ),
                 children: [
-                  Text("Coordinating with $_passengerName", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-                  const SizedBox(height: 15),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => ChatScreen(chatId: "${widget.rideId}_$_passengerUid", otherUserName: _passengerName))),
-                          icon: const Icon(Icons.chat), label: const Text("CHAT"),
+                  TileLayer(
+                    urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                    userAgentPackageName: 'com.example.linkride',
+                  ),
+                  if (_routePoints.isNotEmpty)
+                    PolylineLayer(
+                      polylines: [
+                        Polyline(points: _routePoints, color: Colors.blueAccent, strokeWidth: 5),
+                      ],
+                    ),
+                  MarkerLayer(
+                    markers: [
+                      if (_driverCurrentPos != null)
+                        Marker(
+                          point: _driverCurrentPos!,
+                          child: const Icon(Icons.navigation, color: Colors.blue, size: 35),
                         ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: ElevatedButton(
-                          style: ElevatedButton.styleFrom(backgroundColor: primaryGreen),
-                          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => DriverSecurityVerify(rideId: widget.rideId))),
-                          child: const Text("I HAVE ARRIVED", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                      Marker(
+                        point: _targetPos!,
+                        child: Icon(
+                          hasPassenger ? Icons.person_pin_circle : Icons.location_on,
+                          color: hasPassenger ? Colors.orange : Colors.red,
+                          size: 45,
                         ),
                       ),
                     ],
-                  )
+                  ),
                 ],
               ),
-            ),
-          )
-        ],
+
+              Positioned(top: 50, left: 20, child: CircleAvatar(backgroundColor: Colors.white, child: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => Navigator.pop(context)))),
+
+              Positioned(
+                bottom: 0, left: 0, right: 0,
+                child: Container(
+                  padding: const EdgeInsets.all(25),
+                  decoration: const BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+                    boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 15)],
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(hasPassenger ? "Heading to Passenger" : "Driving to Destination", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                      const SizedBox(height: 20),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceAround,
+                        children: [
+                          _metricItem("Distance", _distance, Icons.straighten),
+                          _metricItem("ETA", _duration, Icons.timer),
+                        ],
+                      ),
+                      const SizedBox(height: 25),
+                      if (hasPassenger)
+                        Row(
+                          children: [
+                            Expanded(child: OutlinedButton(onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => ChatScreen(chatId: "${widget.rideId}_$pUid", otherUserName: "Passenger"))), child: const Text("CHAT"))),
+                            const SizedBox(width: 10),
+                            Expanded(child: ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF11A860)), onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => DriverSecurityVerify(rideId: widget.rideId))), child: const Text("ARRIVED", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)))),
+                          ],
+                        )
+                      else
+                        Container(width: double.infinity, padding: const EdgeInsets.all(15), decoration: BoxDecoration(color: Colors.orange.shade50, borderRadius: BorderRadius.circular(12)), child: const Text("Waiting for passengers...", textAlign: TextAlign.center, style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold))),
+                    ],
+                  ),
+                ),
+              )
+            ],
+          );
+        },
       ),
+    );
+  }
+
+  Widget _metricItem(String label, String value, IconData icon) {
+    return Column(
+      children: [
+        Icon(icon, color: const Color(0xFF11A860), size: 22),
+        const SizedBox(height: 5),
+        Text(value, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+        Text(label, style: const TextStyle(color: Colors.grey, fontSize: 11)),
+      ],
     );
   }
 }

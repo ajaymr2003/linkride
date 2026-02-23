@@ -15,10 +15,9 @@ class RouteOption {
 }
 
 class RideStepRoute extends StatefulWidget {
-  // CHANGED: Accept Map Objects directly
   final Map<String, dynamic> source;
   final Map<String, dynamic> destination;
-  final Function(String) onRouteSelected;
+  final Function(String, List<LatLng>) onRouteSelected;
 
   const RideStepRoute({
     super.key,
@@ -46,10 +45,8 @@ class _RideStepRouteState extends State<RideStepRoute> {
 
   Future<void> _calculateRoutes() async {
     try {
-      // Use coordinates passed from previous steps directly
       final LatLng start = LatLng(widget.source['lat'], widget.source['lng']);
       final LatLng end = LatLng(widget.destination['lat'], widget.destination['lng']);
-
       await _fetchOSRMRoutes(start, end);
     } catch (e) {
       if(mounted) setState(() => _isLoading = false);
@@ -70,7 +67,6 @@ class _RideStepRouteState extends State<RideStepRoute> {
           var r = routesJson[i];
           List<dynamic> coords = r['geometry']['coordinates'];
           List<LatLng> points = coords.map((c) => LatLng(c[1], c[0])).toList();
-
           double distKm = r['distance'] / 1000;
           double durMin = r['duration'] / 60;
           String rName = (r['legs'].isNotEmpty && r['legs'][0]['summary'].isNotEmpty) ? "Via ${r['legs'][0]['summary']}" : "Alternative Route";
@@ -80,14 +76,8 @@ class _RideStepRouteState extends State<RideStepRoute> {
             distance: "${distKm.toStringAsFixed(1)} km",
             duration: "${durMin.round()} min",
             name: i == 0 ? "Fastest Route" : rName,
-            description: i == 0 ? "Best route based on traffic" : "Similar ETA",
+            description: i == 0 ? "Best route" : "Alternate path",
           ));
-        }
-        
-        // Fallback for single route
-        if (tempRoutes.length == 1) {
-           List<LatLng> offsetPoints = tempRoutes[0].points.map((p) => LatLng(p.latitude + 0.001, p.longitude + 0.001)).toList();
-           tempRoutes.add(RouteOption(points: offsetPoints, distance: tempRoutes[0].distance, duration: tempRoutes[0].duration, name: "Via Old Highway", description: "Alternate path"));
         }
 
         if(mounted) {
@@ -103,17 +93,7 @@ class _RideStepRouteState extends State<RideStepRoute> {
   void _fitCameraBounds() {
     if (_routes.isEmpty) return;
     var points = _routes[_selectedRouteIndex].points;
-    double minLat = points.first.latitude, maxLat = points.first.latitude;
-    double minLon = points.first.longitude, maxLon = points.first.longitude;
-
-    for (var p in points) {
-      if (p.latitude < minLat) minLat = p.latitude;
-      if (p.latitude > maxLat) maxLat = p.latitude;
-      if (p.longitude < minLon) minLon = p.longitude;
-      if (p.longitude > maxLon) maxLon = p.longitude;
-    }
-
-    _mapController.fitCamera(CameraFit.bounds(bounds: LatLngBounds(LatLng(minLat, minLon), LatLng(maxLat, maxLon)), padding: const EdgeInsets.all(50)));
+    _mapController.fitCamera(CameraFit.bounds(bounds: LatLngBounds.fromPoints(points), padding: const EdgeInsets.all(50)));
   }
 
   @override
@@ -125,16 +105,19 @@ class _RideStepRouteState extends State<RideStepRoute> {
             mapController: _mapController,
             options: MapOptions(initialCenter: LatLng(widget.source['lat'], widget.source['lng']), initialZoom: 10),
             children: [
-              TileLayer(urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', userAgentPackageName: 'com.example.linkride'),
+              TileLayer(
+                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                userAgentPackageName: 'com.example.linkride', // FIXED POLICY
+              ),
               PolylineLayer(polylines: _routes.asMap().entries.map((e) => Polyline(
                   points: e.value.points, 
-                  strokeWidth: e.key == _selectedRouteIndex ? 5.0 : 4.0, 
+                  strokeWidth: e.key == _selectedRouteIndex ? 5.0 : 3.0, 
                   color: e.key == _selectedRouteIndex ? Colors.blue : Colors.grey)).toList()),
             ],
           ),
         ),
         Container(
-          height: 300,
+          height: 250,
           color: Colors.white,
           padding: const EdgeInsets.all(20),
           child: Column(
@@ -157,7 +140,7 @@ class _RideStepRouteState extends State<RideStepRoute> {
               SizedBox(
                 width: double.infinity, height: 50,
                 child: ElevatedButton(
-                  onPressed: _isLoading ? null : () => widget.onRouteSelected(_routes[_selectedRouteIndex].name),
+                  onPressed: _isLoading ? null : () => widget.onRouteSelected(_routes[_selectedRouteIndex].name, _routes[_selectedRouteIndex].points),
                   style: ElevatedButton.styleFrom(backgroundColor: primaryGreen),
                   child: const Text("CONFIRM ROUTE", style: TextStyle(color: Colors.white)),
                 ),

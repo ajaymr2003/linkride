@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:latlong2/latlong.dart'; // REQUIRED
 import 'ride_steps/step_1_location.dart';
 import 'ride_steps/step_2_destination.dart';
 import 'ride_steps/step_3_route.dart';
@@ -20,10 +21,9 @@ class _RideSetupScreenState extends State<RideSetupScreen> {
   final PageController _pageController = PageController();
   final Color primaryGreen = const Color(0xFF11A860);
 
-  // --- RIDE DATA ---
-  // CHANGED: Now storing Objects (Map), not just strings
   Map<String, dynamic> _source = {}; 
   Map<String, dynamic> _destination = {};
+  List<LatLng> _polylinePoints = []; // ADDED: To store route road path
   
   String _selectedRoute = "";
   DateTime? _rideDate;
@@ -42,9 +42,7 @@ class _RideSetupScreenState extends State<RideSetupScreen> {
     if (_currentStep > 0) {
       _pageController.previousPage(duration: const Duration(milliseconds: 300), curve: Curves.easeInOut);
       setState(() => _currentStep--);
-    } else {
-      Navigator.pop(context);
-    }
+    } else { Navigator.pop(context); }
   }
 
   @override
@@ -68,46 +66,33 @@ class _RideSetupScreenState extends State<RideSetupScreen> {
             children: [
               RideStepLocation(
                 title: "Leaving from...", hint: "Current Location", icon: Icons.my_location,
-                onLocationSelected: (locData) {
-                  setState(() => _source = locData);
-                  _nextPage();
-                },
+                onLocationSelected: (locData) { setState(() => _source = locData); _nextPage(); },
               ),
               RideStepDestination(
-                onLocationSelected: (locData) {
-                  setState(() => _destination = locData);
+                onLocationSelected: (locData) { setState(() => _destination = locData); _nextPage(); },
+              ),
+              RideStepRoute(
+                source: _source, destination: _destination,
+                // UPDATED: Capture coordinates here
+                onRouteSelected: (route, points) {
+                  setState(() {
+                    _selectedRoute = route;
+                    _polylinePoints = points;
+                  });
                   _nextPage();
                 },
               ),
-              // Pass the maps to step 3
-              if(_source.isNotEmpty && _destination.isNotEmpty)
-                RideStepRoute(
-                  source: _source,
-                  destination: _destination,
-                  onRouteSelected: (route) {
-                    setState(() => _selectedRoute = route);
-                    _nextPage();
-                  },
-                )
-              else 
-                const Center(child: CircularProgressIndicator()), // Safety fallback
-
               RideStepDate(onDateSelected: (date) { setState(() => _rideDate = date); _nextPage(); }),
               RideStepTime(onTimeSelected: (time) { setState(() => _rideTime = time); _nextPage(); }),
               RideStepVehicle(onVehicleSelected: (v) { setState(() => _selectedVehicle = v); _nextPage(); }),
               RideStepPassengers(initialCount: _passengerCount, onCountSelected: (count) { setState(() => _passengerCount = count); _nextPage(); }),
               RideStepPrice(recommendedPrice: 150.0, onPriceConfirmed: (price) { setState(() => _pricePerSeat = price); _nextPage(); }),
-              
-              // Pass the maps to step 9
               RideStepPublish(
-                source: _source,
-                destination: _destination,
+                source: _source, destination: _destination,
                 route: _selectedRoute,
-                date: _rideDate,
-                time: _rideTime,
-                vehicle: _selectedVehicle,
-                seats: _passengerCount,
-                price: _pricePerSeat,
+                polyline: _polylinePoints, // ADDED: Pass points to publish step
+                date: _rideDate, time: _rideTime,
+                vehicle: _selectedVehicle, seats: _passengerCount, price: _pricePerSeat,
               ),
             ],
           ),

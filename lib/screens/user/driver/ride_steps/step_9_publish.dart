@@ -2,12 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:latlong2/latlong.dart';
 
 class RideStepPublish extends StatefulWidget {
-  // CHANGED: Accepting Maps
   final Map<String, dynamic> source;
   final Map<String, dynamic> destination;
-  
+  final List<LatLng> polyline; // ADDED
   final String route;
   final DateTime? date;
   final TimeOfDay? time;
@@ -19,6 +19,7 @@ class RideStepPublish extends StatefulWidget {
     super.key,
     required this.source,
     required this.destination,
+    required this.polyline,
     required this.route,
     required this.date,
     required this.time,
@@ -38,34 +39,27 @@ class _RideStepPublishState extends State<RideStepPublish> {
     setState(() => _isPublishing = true);
     try {
       final user = FirebaseAuth.instance.currentUser;
+      final dt = DateTime(widget.date!.year, widget.date!.month, widget.date!.day, widget.time!.hour, widget.time!.minute);
 
-      final dt = DateTime(
-        widget.date!.year, widget.date!.month, widget.date!.day,
-        widget.time!.hour, widget.time!.minute,
-      );
+      // SIMPLIFY ROUTE: Take every 15th point to keep document size small
+      List<Map<String, double>> simplifiedPath = [];
+      for (int i = 0; i < widget.polyline.length; i += 15) {
+        simplifiedPath.add({
+          'lat': widget.polyline[i].latitude,
+          'lng': widget.polyline[i].longitude,
+        });
+      }
+      // Always ensure the final destination is added
+      simplifiedPath.add({'lat': widget.destination['lat'], 'lng': widget.destination['lng']});
 
       await FirebaseFirestore.instance.collection('rides').add({
         'driver_uid': user!.uid,
-        
-        // CHANGED: Storing Object with Name + Coordinates
-        'source': {
-          'name': widget.source['name'],
-          'lat': widget.source['lat'],
-          'lng': widget.source['lng'],
-          // Optional: Store as GeoPoint for easier querying
-          'location': GeoPoint(widget.source['lat'], widget.source['lng']),
-        },
-        'destination': {
-          'name': widget.destination['name'],
-          'lat': widget.destination['lat'],
-          'lng': widget.destination['lng'],
-          'location': GeoPoint(widget.destination['lat'], widget.destination['lng']),
-        },
-
+        'source': widget.source,
+        'destination': widget.destination,
+        'path_points': simplifiedPath, // SAVED FOR MATCHING
         'route': widget.route,
         'departure_time': Timestamp.fromDate(dt),
         'vehicle': widget.vehicle,
-        'total_seats': widget.seats,
         'available_seats': widget.seats,
         'price_per_seat': widget.price,
         'status': 'active',
@@ -74,8 +68,7 @@ class _RideStepPublishState extends State<RideStepPublish> {
 
       if (mounted) {
         showDialog(
-          context: context,
-          barrierDismissible: false,
+          context: context, barrierDismissible: false,
           builder: (context) => AlertDialog(
             content: Column(
               mainAxisSize: MainAxisSize.min,
@@ -86,10 +79,7 @@ class _RideStepPublishState extends State<RideStepPublish> {
                 const SizedBox(height: 20),
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF11A860)),
-                  onPressed: () {
-                    Navigator.pop(context); // Close dialog
-                    Navigator.pop(context); // Close Setup Screen
-                  },
+                  onPressed: () { Navigator.pop(context); Navigator.pop(context); },
                   child: const Text("DONE", style: TextStyle(color: Colors.white)),
                 ),
               ],
@@ -112,13 +102,12 @@ class _RideStepPublishState extends State<RideStepPublish> {
         children: [
           const Text("Review your ride", style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold, color: Color(0xFF2B5145))),
           const SizedBox(height: 20),
-
           Container(
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(15), border: Border.all(color: Colors.grey.shade200)),
             child: Column(
               children: [
-                _row(Icons.my_location, widget.source['name']), // Display just the name
+                _row(Icons.my_location, widget.source['name']),
                 const Padding(padding: EdgeInsets.only(left: 12), child: SizedBox(height: 20, child: VerticalDivider())),
                 _row(Icons.location_on, widget.destination['name']),
                 const Divider(height: 30),
@@ -134,16 +123,13 @@ class _RideStepPublishState extends State<RideStepPublish> {
               ],
             ),
           ),
-
           const Spacer(),
           SizedBox(
             width: double.infinity, height: 55,
             child: ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF11A860)),
               onPressed: _isPublishing ? null : _publishRide,
-              child: _isPublishing 
-                ? const CircularProgressIndicator(color: Colors.white) 
-                : const Text("PUBLISH RIDE", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF11A860)),
+              child: _isPublishing ? const CircularProgressIndicator(color: Colors.white) : const Text("PUBLISH RIDE", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
             ),
           ),
         ],
@@ -152,12 +138,6 @@ class _RideStepPublishState extends State<RideStepPublish> {
   }
 
   Widget _row(IconData icon, String text) {
-    return Row(
-      children: [
-        Icon(icon, color: const Color(0xFF11A860), size: 20),
-        const SizedBox(width: 15),
-        Expanded(child: Text(text, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500))),
-      ],
-    );
+    return Row(children: [Icon(icon, color: const Color(0xFF11A860), size: 20), const SizedBox(width: 15), Expanded(child: Text(text, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500)))]);
   }
 }
