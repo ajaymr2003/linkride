@@ -24,12 +24,11 @@ class _PassengerLiveTrackingState extends State<PassengerLiveTracking> {
   final MapController _mapController = MapController();
   final String _myUid = FirebaseAuth.instance.currentUser!.uid;
 
-  // Locations
-  LatLng? _myPos;       // Passenger's Live GPS
-  LatLng? _driverPos;   // Driver's Live GPS (from RTDB)
-  LatLng? _pickupPos;   // Fixed Point (from Firestore)
+  LatLng? _myPos;       
+  LatLng? _driverPos;   
+  LatLng? _pickupPos;   
   
-  List<LatLng> _driverRoutePoints = []; // Road path
+  List<LatLng> _driverRoutePoints = []; 
   bool _isMapReady = false;
 
   String _distance = "--";
@@ -45,7 +44,6 @@ class _PassengerLiveTrackingState extends State<PassengerLiveTracking> {
     _listenToDriver();
   }
 
-  // --- 1. TRACK PASSENGER'S OWN LIVE LOCATION ---
   void _startMyTracking() {
     _myLocationSub = Geolocator.getPositionStream(
       locationSettings: const LocationSettings(accuracy: LocationAccuracy.high, distanceFilter: 5)
@@ -57,7 +55,6 @@ class _PassengerLiveTrackingState extends State<PassengerLiveTracking> {
     });
   }
 
-  // --- 2. LISTEN TO DRIVER'S LIVE LOCATION FROM RTDB ---
   void _listenToDriver() {
     String dUid = widget.rideData['driver_uid'];
     _driverLocationSub = FirebaseDatabase.instance.ref('user_locations/$dUid').onValue.listen((event) {
@@ -66,7 +63,7 @@ class _PassengerLiveTrackingState extends State<PassengerLiveTracking> {
       
       if (mounted) {
         setState(() => _driverPos = LatLng(data['lat'], data['lng']));
-        if (_pickupPos != null) {
+        if (_pickupPos != null && _driverPos != null) {
           _fetchDriverRoadRoute(_driverPos!, _pickupPos!);
         }
         _fitMap();
@@ -74,21 +71,14 @@ class _PassengerLiveTrackingState extends State<PassengerLiveTracking> {
     });
   }
 
-  // --- 3. AUTO-ZOOM TO FIT ALL THREE POINTS ---
   void _fitMap() {
     if (!_isMapReady || _myPos == null || _driverPos == null || _pickupPos == null) return;
-
     var bounds = LatLngBounds.fromPoints([_myPos!, _driverPos!, _pickupPos!]);
-    _mapController.fitCamera(
-      CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(70)),
-    );
+    _mapController.fitCamera(CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(70)));
   }
 
-  // --- 4. FETCH ROAD ROUTE FOR DRIVER ---
   Future<void> _fetchDriverRoadRoute(LatLng start, LatLng end) async {
-    final url = Uri.parse(
-        'http://router.project-osrm.org/route/v1/driving/${start.longitude},${start.latitude};${end.longitude},${end.latitude}?overview=full&geometries=geojson');
-
+    final url = Uri.parse('http://router.project-osrm.org/route/v1/driving/${start.longitude},${start.latitude};${end.longitude},${end.latitude}?overview=full&geometries=geojson');
     try {
       final response = await http.get(url);
       if (response.statusCode == 200) {
@@ -96,14 +86,33 @@ class _PassengerLiveTrackingState extends State<PassengerLiveTracking> {
         final route = data['routes'][0];
         if (mounted) {
           setState(() {
-            _driverRoutePoints = (route['geometry']['coordinates'] as List)
-                .map((c) => LatLng(c[1], c[0])).toList();
+            _driverRoutePoints = (route['geometry']['coordinates'] as List).map((c) => LatLng(c[1], c[0])).toList();
             _distance = "${(route['distance'] / 1000).toStringAsFixed(1)} km";
             _duration = "${(route['duration'] / 60).toStringAsFixed(0)} min";
           });
         }
       }
     } catch (e) {}
+  }
+
+  void _confirmDriverArrived(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Driver Arrived?"),
+        content: const Text("Is the driver at your location? Confirming will generate the security PIN to start your ride."),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("NO")),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              Navigator.push(context, MaterialPageRoute(builder: (_) => PassengerSecurityDisplay(rideId: widget.rideId)));
+            }, 
+            child: const Text("YES, DRIVER IS HERE", style: TextStyle(color: Color(0xFF11A860), fontWeight: FontWeight.bold))
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -120,11 +129,14 @@ class _PassengerLiveTrackingState extends State<PassengerLiveTracking> {
         stream: FirebaseFirestore.instance.collection('rides').doc(widget.rideId).snapshots(),
         builder: (context, snapshot) {
           if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
-
           var ride = snapshot.data!.data() as Map<String, dynamic>;
-          // Fetch Pickup coordinates saved during Driver Acceptance
-          var myRoute = ride['passenger_routes'][_myUid]['pickup'];
-          _pickupPos = LatLng(myRoute['lat'], myRoute['lng']);
+          
+          try {
+             var myRoute = ride['passenger_routes'][_myUid]['pickup'];
+             _pickupPos = LatLng(myRoute['lat'], myRoute['lng']);
+          } catch (e) {
+             _pickupPos = LatLng(ride['source']['lat'], ride['source']['lng']);
+          }
 
           return Stack(
             children: [
@@ -133,60 +145,25 @@ class _PassengerLiveTrackingState extends State<PassengerLiveTracking> {
                 options: MapOptions(
                   initialCenter: _pickupPos!,
                   initialZoom: 15,
-                  onMapReady: () {
-                    setState(() => _isMapReady = true);
-                    _fitMap();
-                  },
+                  onMapReady: () { setState(() => _isMapReady = true); _fitMap(); },
                 ),
                 children: [
-                  TileLayer(
-                    urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                    userAgentPackageName: 'com.example.linkride',
-                  ),
-                  
-                  // LAYER 1: DRIVER ROAD ROUTE (Solid Blue)
-                  if (_driverRoutePoints.isNotEmpty)
-                    PolylineLayer(polylines: [
-                      Polyline(points: _driverRoutePoints, color: Colors.blue, strokeWidth: 5),
-                    ]),
-
-                  // LAYER 2: PASSENGER TO PICKUP (Dotted Orange)
-                  if (_myPos != null && _pickupPos != null)
-                    PolylineLayer(polylines: [
-                      Polyline(
-                        points: [_myPos!, _pickupPos!],
-                        color: Colors.orange,
-                        strokeWidth: 3,
-                        isDotted: true, // <--- THE DOTTED LINE
-                      ),
-                    ]),
-
+                  TileLayer(urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', userAgentPackageName: 'com.example.linkride'),
+                  if (_driverRoutePoints.isNotEmpty) PolylineLayer(polylines: [Polyline(points: _driverRoutePoints, color: Colors.blue, strokeWidth: 5)]),
+                  if (_myPos != null && _pickupPos != null) PolylineLayer(polylines: [Polyline(points: [_myPos!, _pickupPos!], color: Colors.orange, strokeWidth: 3, isDotted: true)]),
                   MarkerLayer(markers: [
-                    // Driver Marker
-                    if (_driverPos != null)
-                      Marker(point: _driverPos!, child: const Icon(Icons.directions_car, color: Colors.blue, size: 30)),
-                    
-                    // Pickup Point Marker
-                    Marker(point: _pickupPos!, child: const Icon(Icons.location_on, color: Colors.red, size: 40)),
-
-                    // Passenger Live Marker
-                    if (_myPos != null)
-                      Marker(point: _myPos!, child: const Icon(Icons.person_pin_circle, color: Colors.orange, size: 35)),
+                    if (_driverPos != null) Marker(point: _driverPos!, width: 80, height: 80, child: Column(children: [_labelContainer("Driver", Colors.blue), const Icon(Icons.directions_car, color: Colors.blue, size: 30)])),
+                    Marker(point: _pickupPos!, width: 130, height: 80, child: Column(children: [_labelContainer("PICKUP LOCATION", Colors.red), const Icon(Icons.location_on, color: Colors.red, size: 40)])),
+                    if (_myPos != null) Marker(point: _myPos!, width: 110, height: 80, child: Column(children: [_labelContainer("YOUR LOCATION", Colors.orange), const Icon(Icons.person_pin_circle, color: Colors.orange, size: 35)])),
                   ]),
                 ],
               ),
-
               Positioned(top: 50, left: 20, child: CircleAvatar(backgroundColor: Colors.white, child: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => Navigator.pop(context)))),
-
               Positioned(
                 bottom: 0, left: 0, right: 0,
                 child: Container(
                   padding: const EdgeInsets.all(25),
-                  decoration: const BoxDecoration(
-                    color: Colors.white, 
-                    borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
-                    boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 10)]
-                  ),
+                  decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(30)), boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 10)]),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -207,8 +184,8 @@ class _PassengerLiveTrackingState extends State<PassengerLiveTracking> {
                           Expanded(
                             child: ElevatedButton(
                               style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF11A860)),
-                              onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => PassengerSecurityDisplay(rideId: widget.rideId))),
-                              child: const Text("GET PIN", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                              onPressed: () => _confirmDriverArrived(context),
+                              child: const Text("DRIVER ARRIVED", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                             ),
                           ),
                         ],
@@ -225,4 +202,12 @@ class _PassengerLiveTrackingState extends State<PassengerLiveTracking> {
   }
 
   Widget _metric(String l, String v) => Column(children: [Text(v, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)), Text(l, style: const TextStyle(color: Colors.grey, fontSize: 11))]);
+
+  Widget _labelContainer(String text, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(8)),
+      child: Text(text, style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold)),
+    );
+  }
 }

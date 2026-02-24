@@ -47,15 +47,15 @@ class _PassengerRequestDetailScreenState
           int seats = rideSnap['available_seats'] ?? 0;
           if (seats < 1) throw "No seats left";
 
-          // --- CRITICAL PART: STORING DATA IN RIDES COLLECTION ---
+          // --- UPDATED PART: ADDED ride_status: 'approved' ---
           transaction.update(rideRef, {
             'available_seats': seats - 1,
             'passengers': FieldValue.arrayUnion([pId]),
-            // Use dot notation to create/update a map entry for this specific passenger
             'passenger_routes.$pId': {
-              'pickup': widget.bookingData['source'],      // Passenger Source
-              'dropoff': widget.bookingData['destination'], // Passenger Destination
+              'pickup': widget.bookingData['source'],      
+              'dropoff': widget.bookingData['destination'], 
               'passenger_name': widget.bookingData['passenger_name'] ?? "Passenger",
+              'ride_status': 'approved', // <--- Added this line
             }
           });
 

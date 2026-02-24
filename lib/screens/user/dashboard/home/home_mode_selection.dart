@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-
-// Existing Imports
 import '../../passenger/search_ride.dart';
 import 'driver_dashboard.dart';
 import '../../driver_setup/driver_setup_controller.dart';
 import '../inbox/inbox_page.dart';
+import '../../../ride/passenger/passenger_moving_screen.dart';
+import '../../../ride/driver/ride_moving_screen.dart';
+
 
 // NEW SPLIT RIDE IMPORTS
 import '/screens/ride/driver/driver_live_tracking.dart';
@@ -221,6 +222,7 @@ class _HomeModeSelectionState extends State<HomeModeSelection> {
   }
 
   // --- UPDATED: TODAY'S ACTIVE RIDE BANNER WITH SPLIT NAVIGATION ---
+  // --- UPDATED: TODAY'S ACTIVE RIDE BANNER WITH STATUS CHECKING ---
   Widget _buildActiveRideBanner() {
     final String uid = FirebaseAuth.instance.currentUser?.uid ?? "";
     final now = DateTime.now();
@@ -236,7 +238,6 @@ class _HomeModeSelectionState extends State<HomeModeSelection> {
       builder: (context, snapshot) {
         if (!snapshot.hasData || snapshot.data!.docs.isEmpty) return const SizedBox.shrink();
 
-        // Filter for rides where user is Driver OR Passenger
         var myRideDoc = snapshot.data!.docs.where((doc) {
           var data = doc.data() as Map<String, dynamic>;
           List passengers = data['passengers'] ?? [];
@@ -247,22 +248,43 @@ class _HomeModeSelectionState extends State<HomeModeSelection> {
 
         var rideData = myRideDoc.first.data() as Map<String, dynamic>;
         var rideId = myRideDoc.first.id;
-        
-        // CHECK ROLE
         bool isDriver = rideData['driver_uid'] == uid;
 
         return GestureDetector(
           onTap: () {
             if (isDriver) {
-              Navigator.push(
-                context, 
-                MaterialPageRoute(builder: (_) => DriverLiveTracking(rideData: rideData, rideId: rideId))
-              );
+              // --- DRIVER LOGIC ---
+              // Check if there is any passenger who is NOT YET verified
+              List passengers = rideData['passengers'] ?? [];
+              Map<String, dynamic> routes = rideData['passenger_routes'] ?? {};
+              
+              bool anyPendingPickup = false;
+              for (var pId in passengers) {
+                if (routes[pId]['ride_status'] != 'security_completed') {
+                  anyPendingPickup = true;
+                  break;
+                }
+              }
+
+              if (anyPendingPickup) {
+                Navigator.push(context, MaterialPageRoute(builder: (_) => DriverLiveTracking(rideData: rideData, rideId: rideId)));
+              } else {
+                // If all passengers are verified, go straight to moving screen
+                Navigator.push(context, MaterialPageRoute(builder: (_) => RideMovingScreen(rideId: rideId, rideData: rideData)));
+              }
             } else {
-              Navigator.push(
-                context, 
-                MaterialPageRoute(builder: (_) => PassengerLiveTracking(rideData: rideData, rideId: rideId))
-              );
+              // --- PASSENGER LOGIC ---
+              // Check this specific passenger's status
+              Map<String, dynamic> routes = rideData['passenger_routes'] ?? {};
+              String myStatus = routes[uid]['ride_status'] ?? 'approved';
+
+              if (myStatus == 'security_completed') {
+                // If I am verified, show me the live trip map
+                Navigator.push(context, MaterialPageRoute(builder: (_) => PassengerMovingScreen(rideId: rideId, rideData: rideData)));
+              } else {
+                // If not verified yet, show me the driver coming to pick me up
+                Navigator.push(context, MaterialPageRoute(builder: (_) => PassengerLiveTracking(rideData: rideData, rideId: rideId)));
+              }
             }
           },
           child: Container(
@@ -282,7 +304,7 @@ class _HomeModeSelectionState extends State<HomeModeSelection> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text("You have a ride today!", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                      Text("Tap to open live map coordination", style: TextStyle(color: Colors.white70, fontSize: 12)),
+                      Text("Tap to open live coordination", style: TextStyle(color: Colors.white70, fontSize: 12)),
                     ],
                   ),
                 ),
