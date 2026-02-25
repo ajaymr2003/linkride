@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_database/firebase_database.dart';
 import 'package:intl/intl.dart';
 import '../../../services/fcm_service.dart';
 
@@ -47,7 +46,7 @@ class _PassengerRequestDetailScreenState
           int seats = rideSnap['available_seats'] ?? 0;
           if (seats < 1) throw "No seats left";
 
-          // --- UPDATED PART: ADDED ride_status: 'approved' ---
+          // --- UPDATED: MAPS PASSENGER SPECIFIC DATA INTO THE RIDE ---
           transaction.update(rideRef, {
             'available_seats': seats - 1,
             'passengers': FieldValue.arrayUnion([pId]),
@@ -55,7 +54,8 @@ class _PassengerRequestDetailScreenState
               'pickup': widget.bookingData['source'],      
               'dropoff': widget.bookingData['destination'], 
               'passenger_name': widget.bookingData['passenger_name'] ?? "Passenger",
-              'ride_status': 'approved', // <--- Added this line
+              'ride_status': 'approved', 
+              'payment_status': 'unpaid',
             }
           });
 
@@ -82,7 +82,7 @@ class _PassengerRequestDetailScreenState
             },
           );
 
-          // 5. Notification Record
+          // 5. Notification Record for Passenger
           transaction.set(
             FirebaseFirestore.instance.collection('notifications').doc(),
             {

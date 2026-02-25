@@ -7,7 +7,7 @@ import 'package:latlong2/latlong.dart';
 class RideStepPublish extends StatefulWidget {
   final Map<String, dynamic> source;
   final Map<String, dynamic> destination;
-  final List<LatLng> polyline; // ADDED
+  final List<LatLng> polyline; 
   final String route;
   final DateTime? date;
   final TimeOfDay? time;
@@ -49,20 +49,21 @@ class _RideStepPublishState extends State<RideStepPublish> {
           'lng': widget.polyline[i].longitude,
         });
       }
-      // Always ensure the final destination is added
       simplifiedPath.add({'lat': widget.destination['lat'], 'lng': widget.destination['lng']});
 
+      // --- FIRESTORE UPDATE ---
       await FirebaseFirestore.instance.collection('rides').add({
         'driver_uid': user!.uid,
         'source': widget.source,
         'destination': widget.destination,
-        'path_points': simplifiedPath, // SAVED FOR MATCHING
+        'path_points': simplifiedPath, 
         'route': widget.route,
         'departure_time': Timestamp.fromDate(dt),
         'vehicle': widget.vehicle,
         'available_seats': widget.seats,
         'price_per_seat': widget.price,
-        'status': 'active',
+        'status': 'active',           // This is for search visibility
+        'ride_status': 'created',      // <--- NEW FIELD ADDED HERE
         'created_at': FieldValue.serverTimestamp(),
       });
 

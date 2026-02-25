@@ -6,14 +6,14 @@ import 'package:intl/intl.dart';
 class ActiveRideBanner extends StatelessWidget {
   const ActiveRideBanner({super.key});
 
-  // --- LOGIC TO DELETE/CANCEL REQUEST ---
+  // --- UPDATED LOGIC TO CHANGE STATUS INSTEAD OF DELETING ---
   Future<void> _cancelRequest(BuildContext context, String bookingId, String status, String rideId) async {
     // 1. Confirm Dialog
     bool confirm = await showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(status == 'pending' ? "Cancel Request?" : "Cancel Ride?"),
-        content: const Text("Are you sure? This action cannot be undone."),
+        content: const Text("Are you sure? You can view this later in your Activity tab."),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("No")),
           TextButton(
@@ -27,24 +27,41 @@ class ActiveRideBanner extends StatelessWidget {
     if (!confirm) return;
 
     try {
-      // 2. Handle Cancellation based on status
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+
+      // 2. Handle Cancellation Logic
       if (status == 'accepted') {
-        // If driver accepted, we must give the seat back (Transaction)
+        // If the ride was already accepted, we must give the seat back to the driver
         await FirebaseFirestore.instance.runTransaction((transaction) async {
           DocumentReference rideRef = FirebaseFirestore.instance.collection('rides').doc(rideId);
           DocumentSnapshot rideSnap = await transaction.get(rideRef);
           
           if (rideSnap.exists) {
             int currentSeats = rideSnap['available_seats'] ?? 0;
-            transaction.update(rideRef, {'available_seats': currentSeats + 1});
+            
+            // Increment seats and remove user from the passengers array
+            transaction.update(rideRef, {
+              'available_seats': currentSeats + 1,
+              'passengers': FieldValue.arrayRemove([user.uid]),
+              // Also clean up the passenger specific route map if it exists
+              'passenger_routes.${user.uid}': FieldValue.delete(),
+            });
           }
           
+          // Update the BOOKING status to cancelled (Do NOT delete)
           DocumentReference bookingRef = FirebaseFirestore.instance.collection('bookings').doc(bookingId);
-          transaction.delete(bookingRef); 
+          transaction.update(bookingRef, {
+            'status': 'cancelled',
+            'cancelled_at': FieldValue.serverTimestamp(),
+          }); 
         });
       } else {
-        // If just pending, simply delete the request
-        await FirebaseFirestore.instance.collection('bookings').doc(bookingId).delete();
+        // If just pending, simply change status to cancelled
+        await FirebaseFirestore.instance.collection('bookings').doc(bookingId).update({
+          'status': 'cancelled',
+          'cancelled_at': FieldValue.serverTimestamp(),
+        });
       }
 
       if (context.mounted) {
@@ -63,8 +80,8 @@ class ActiveRideBanner extends StatelessWidget {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return const SizedBox();
 
-    // LISTEN TO DB: This StreamBuilder ensures we check for active bookings
-    // "At any time" this widget is on screen.
+    // Stream only listens for 'pending' or 'accepted'
+    // Once status becomes 'cancelled', it will automatically disappear from this banner
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
           .collection('bookings')
@@ -73,12 +90,10 @@ class ActiveRideBanner extends StatelessWidget {
           .orderBy('created_at', descending: true)
           .snapshots(),
       builder: (context, snapshot) {
-        // If no active requests found, hide this widget completely
         if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
           return const SizedBox(); 
         }
 
-        // Get the most recent active request
         var booking = snapshot.data!.docs.first;
         var data = booking.data() as Map<String, dynamic>;
         
@@ -92,10 +107,10 @@ class ActiveRideBanner extends StatelessWidget {
         }
 
         return Container(
-          margin: const EdgeInsets.only(bottom: 20), // Spacing between banner and search card
+          margin: const EdgeInsets.only(bottom: 20), 
           padding: const EdgeInsets.all(15),
           decoration: BoxDecoration(
-            color: isAccepted ? const Color(0xFFE8F5E9) : const Color(0xFFFFF3E0), // Green for Booked, Orange for Pending
+            color: isAccepted ? const Color(0xFFE8F5E9) : const Color(0xFFFFF3E0),
             borderRadius: BorderRadius.circular(15),
             border: Border.all(
               color: isAccepted ? Colors.green.shade200 : Colors.orange.shade200,
@@ -107,7 +122,6 @@ class ActiveRideBanner extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Header Row
               Row(
                 children: [
                   Icon(
@@ -132,7 +146,6 @@ class ActiveRideBanner extends StatelessWidget {
               ),
               const SizedBox(height: 10),
               
-              // Details
               Text(
                 "Trip to $destName",
                 style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
@@ -147,7 +160,6 @@ class ActiveRideBanner extends StatelessWidget {
               
               const SizedBox(height: 15),
               
-              // Cancel/Delete Button
               SizedBox(
                 width: double.infinity,
                 height: 40,

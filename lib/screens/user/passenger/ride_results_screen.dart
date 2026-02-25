@@ -35,7 +35,6 @@ class _RideResultsScreenState extends State<RideResultsScreen> {
         builder: (context, snapshot) {
           if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
 
-          // WAYPOINT MATCHING LOGIC
           var filteredRides = snapshot.data!.docs.where((doc) {
             var data = doc.data() as Map<String, dynamic>;
             if ((data['available_seats'] ?? 0) < widget.passengers) return false;
@@ -46,7 +45,6 @@ class _RideResultsScreenState extends State<RideResultsScreen> {
             bool pickupMatch = false;
             int pickupIdx = -1;
 
-            // 1. Is pickup near ANY point on driver's route?
             for (int i = 0; i < path.length; i++) {
               double dist = Geolocator.distanceBetween(widget.source['lat'], widget.source['lng'], path[i]['lat'], path[i]['lng']);
               if (dist <= 10000) { // 10km radius
@@ -57,7 +55,6 @@ class _RideResultsScreenState extends State<RideResultsScreen> {
             }
             if (!pickupMatch) return false;
 
-            // 2. Is drop-off near ANY point AFTER pickup?
             bool dropMatch = false;
             for (int j = pickupIdx; j < path.length; j++) {
               double dist = Geolocator.distanceBetween(widget.destination['lat'], widget.destination['lng'], path[j]['lat'], path[j]['lng']);
@@ -78,7 +75,18 @@ class _RideResultsScreenState extends State<RideResultsScreen> {
               var data = filteredRides[index].data() as Map<String, dynamic>;
               DateTime dep = (data['departure_time'] as Timestamp).toDate();
               return GestureDetector(
-                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => RideViewScreen(rideId: filteredRides[index].id, rideData: data))),
+                onTap: () => Navigator.push(
+                  context, 
+                  MaterialPageRoute(
+                    builder: (_) => RideViewScreen(
+                      rideId: filteredRides[index].id, 
+                      rideData: data,
+                      // PASSING SEARCHED LOCATIONS HERE
+                      passengerSource: widget.source,
+                      passengerDestination: widget.destination,
+                    )
+                  )
+                ),
                 child: Card(
                   margin: const EdgeInsets.only(bottom: 12),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
