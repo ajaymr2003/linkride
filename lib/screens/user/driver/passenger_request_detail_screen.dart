@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:intl/intl.dart';
 import '../../../services/fcm_service.dart';
 
 class PassengerRequestDetailScreen extends StatefulWidget {
@@ -23,6 +22,97 @@ class _PassengerRequestDetailScreenState
   final Color primaryGreen = const Color(0xFF11A860);
   bool _isLoading = false;
 
+  // --- LOGIC: CANCEL ACCEPTED BOOKING (CLEANUP + NOTIFICATIONS) ---
+  Future<void> _cancelBooking() async {
+    bool confirm = await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Cancel Booking?"),
+        content: const Text("This will remove the passenger, free up the seat, and notify the passenger."),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("No")),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true), 
+            child: const Text("Yes, Cancel", style: TextStyle(color: Colors.red))
+          ),
+        ],
+      ),
+    ) ?? false;
+
+    if (!confirm) return;
+
+    setState(() => _isLoading = true);
+    String rId = widget.bookingData['ride_id'];
+    String pId = widget.bookingData['passenger_uid'];
+    String destinationName = widget.bookingData['destination']['name'] ?? "Destination";
+
+    try {
+      // 1. Fetch Passenger FCM Token first
+      DocumentSnapshot passengerSnap = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(pId)
+          .get();
+      String? passengerToken = passengerSnap.exists ? passengerSnap.get('fcm_token') : null;
+
+      // 2. RUN DATABASE TRANSACTION (CLEANUP + INTERNAL NOTIF)
+      await FirebaseFirestore.instance.runTransaction((transaction) async {
+        DocumentReference rideRef = FirebaseFirestore.instance.collection('rides').doc(rId);
+        DocumentSnapshot rideSnap = await transaction.get(rideRef);
+
+        if (rideSnap.exists) {
+          int currentSeats = rideSnap['available_seats'] ?? 0;
+          
+          // A. Clean up Ride Data: Increment seats, remove UID, delete route map
+          transaction.update(rideRef, {
+            'available_seats': currentSeats + 1,
+            'passengers': FieldValue.arrayRemove([pId]),
+            'passenger_routes.$pId': FieldValue.delete(),
+          });
+        }
+
+        // B. Update the Booking document status
+        transaction.update(
+          FirebaseFirestore.instance.collection('bookings').doc(widget.bookingId),
+          {
+            'status': 'cancelled',
+            'cancelled_by': 'driver',
+            'cancelled_at': FieldValue.serverTimestamp(),
+          },
+        );
+
+        // C. Create In-App Notification document for Passenger
+        DocumentReference notifRef = FirebaseFirestore.instance.collection('notifications').doc();
+        transaction.set(notifRef, {
+          'uid': pId,
+          'title': 'Ride Cancelled ⚠️',
+          'message': 'The driver has cancelled your seat for the ride to $destinationName.',
+          'type': 'booking_cancelled',
+          'timestamp': FieldValue.serverTimestamp(),
+          'isRead': false,
+        });
+      });
+
+      // 3. Trigger External Push Notification (FCM)
+      if (passengerToken != null && passengerToken.isNotEmpty) {
+        await FCMService.sendPushNotification(
+          token: passengerToken,
+          title: "Ride Cancelled ⚠️",
+          body: "The driver removed you from the ride to $destinationName.",
+        );
+      }
+
+      if (mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Booking cancelled and passenger notified.")));
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
+      }
+    }
+  }
+
   Future<void> _handleAction(String status) async {
     setState(() => _isLoading = true);
     String rId = widget.bookingData['ride_id'];
@@ -30,14 +120,12 @@ class _PassengerRequestDetailScreenState
 
     try {
       if (status == 'accepted') {
-        // 1. Fetch Passenger FCM Token
         DocumentSnapshot passengerSnap = await FirebaseFirestore.instance
             .collection('users')
             .doc(pId)
             .get();
-        String? passengerToken = passengerSnap.get('fcm_token');
+        String? passengerToken = passengerSnap.exists ? passengerSnap.get('fcm_token') : null;
 
-        // 2. RUN DATABASE TRANSACTION
         await FirebaseFirestore.instance.runTransaction((transaction) async {
           DocumentReference rideRef = FirebaseFirestore.instance.collection('rides').doc(rId);
           DocumentSnapshot rideSnap = await transaction.get(rideRef);
@@ -46,7 +134,6 @@ class _PassengerRequestDetailScreenState
           int seats = rideSnap['available_seats'] ?? 0;
           if (seats < 1) throw "No seats left";
 
-          // --- UPDATED: MAPS PASSENGER SPECIFIC DATA INTO THE RIDE ---
           transaction.update(rideRef, {
             'available_seats': seats - 1,
             'passengers': FieldValue.arrayUnion([pId]),
@@ -59,7 +146,6 @@ class _PassengerRequestDetailScreenState
             }
           });
 
-          // 3. Update Booking status
           transaction.update(
             FirebaseFirestore.instance.collection('bookings').doc(widget.bookingId),
             {
@@ -68,7 +154,6 @@ class _PassengerRequestDetailScreenState
             },
           );
 
-          // 4. Initialize Chat Metadata
           String chatId = "${rId}_$pId";
           transaction.set(
             FirebaseFirestore.instance.collection('chats').doc(chatId),
@@ -82,7 +167,6 @@ class _PassengerRequestDetailScreenState
             },
           );
 
-          // 5. Notification Record for Passenger
           transaction.set(
             FirebaseFirestore.instance.collection('notifications').doc(),
             {
@@ -96,16 +180,14 @@ class _PassengerRequestDetailScreenState
           );
         });
 
-        // 6. Send Push Notification
         if (passengerToken != null) {
-          FCMService.sendPushNotification(
+          await FCMService.sendPushNotification(
             token: passengerToken,
             title: "Ride Accepted! 🚗",
             body: "The driver accepted your ride to ${widget.bookingData['destination']['name']}.",
           );
         }
       } else {
-        // If status is rejected
         await FirebaseFirestore.instance.collection('bookings').doc(widget.bookingId).update({
           'status': 'rejected',
           'responded_at': FieldValue.serverTimestamp(),
@@ -127,7 +209,9 @@ class _PassengerRequestDetailScreenState
   @override
   Widget build(BuildContext context) {
     String passengerId = widget.bookingData['passenger_uid'];
-    bool isPending = widget.bookingData['status'] == 'pending';
+    String status = widget.bookingData['status'] ?? 'pending';
+    bool isPending = status == 'pending';
+    bool isAccepted = status == 'accepted';
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -152,6 +236,25 @@ class _PassengerRequestDetailScreenState
                       ),
                       const SizedBox(height: 15),
                       Text(user['name'] ?? "User", style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+                      
+                      // Status Badge
+                      Container(
+                        margin: const EdgeInsets.only(top: 10),
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: isAccepted ? Colors.green.shade50 : (status == 'cancelled' ? Colors.red.shade50 : Colors.orange.shade50),
+                          borderRadius: BorderRadius.circular(20)
+                        ),
+                        child: Text(
+                          status.toUpperCase(), 
+                          style: TextStyle(
+                            color: isAccepted ? Colors.green : (status == 'cancelled' ? Colors.red : Colors.orange), 
+                            fontWeight: FontWeight.bold, 
+                            fontSize: 12
+                          )
+                        ),
+                      ),
+                      
                       const SizedBox(height: 30),
                       const Divider(),
                       const SizedBox(height: 20),
@@ -162,29 +265,52 @@ class _PassengerRequestDetailScreenState
                   ),
                 ),
               ),
-              if (isPending)
-                Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: _isLoading ? null : () => _handleAction('rejected'),
-                          style: OutlinedButton.styleFrom(foregroundColor: Colors.red, side: const BorderSide(color: Colors.red), padding: const EdgeInsets.symmetric(vertical: 15)),
-                          child: const Text("DECLINE"),
+              
+              Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  children: [
+                    if (isPending)
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: _isLoading ? null : () => _handleAction('rejected'),
+                              style: OutlinedButton.styleFrom(foregroundColor: Colors.red, side: const BorderSide(color: Colors.red), padding: const EdgeInsets.symmetric(vertical: 15)),
+                              child: const Text("DECLINE"),
+                            ),
+                          ),
+                          const SizedBox(width: 15),
+                          Expanded(
+                            child: ElevatedButton(
+                              onPressed: _isLoading ? null : () => _handleAction('accepted'),
+                              style: ElevatedButton.styleFrom(backgroundColor: primaryGreen, padding: const EdgeInsets.symmetric(vertical: 15)),
+                              child: _isLoading ? const CircularProgressIndicator(color: Colors.white) : const Text("ACCEPT", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                            ),
+                          ),
+                        ],
+                      ),
+                    
+                    if (isAccepted)
+                      SizedBox(
+                        width: double.infinity,
+                        height: 55,
+                        child: OutlinedButton.icon(
+                          onPressed: _isLoading ? null : _cancelBooking,
+                          icon: _isLoading ? null : const Icon(Icons.cancel_outlined),
+                          label: _isLoading 
+                            ? const CircularProgressIndicator(color: Colors.red) 
+                            : const Text("CANCEL THIS BOOKING", style: TextStyle(fontWeight: FontWeight.bold)),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.red,
+                            side: const BorderSide(color: Colors.red),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))
+                          ),
                         ),
                       ),
-                      const SizedBox(width: 15),
-                      Expanded(
-                        child: ElevatedButton(
-                          onPressed: _isLoading ? null : () => _handleAction('accepted'),
-                          style: ElevatedButton.styleFrom(backgroundColor: primaryGreen, padding: const EdgeInsets.symmetric(vertical: 15)),
-                          child: _isLoading ? const CircularProgressIndicator(color: Colors.white) : const Text("ACCEPT", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                        ),
-                      ),
-                    ],
-                  ),
-                )
+                  ],
+                ),
+              )
             ],
           );
         },

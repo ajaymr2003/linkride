@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart'; 
 import 'package:intl/intl.dart';
 import 'package:geolocator/geolocator.dart';
 import 'ride_view_screen.dart'; 
@@ -22,6 +23,7 @@ class _RideResultsScreenState extends State<RideResultsScreen> {
   @override
   Widget build(BuildContext context) {
     DateTime now = DateTime.now();
+    final String currentUid = FirebaseAuth.instance.currentUser?.uid ?? "";
 
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5F5),
@@ -37,6 +39,9 @@ class _RideResultsScreenState extends State<RideResultsScreen> {
 
           var filteredRides = snapshot.data!.docs.where((doc) {
             var data = doc.data() as Map<String, dynamic>;
+
+            // --- REMOVED THE SKIP LOGIC TO ALLOW VIEWING OWN RIDE ---
+
             if ((data['available_seats'] ?? 0) < widget.passengers) return false;
 
             List path = data['path_points'] ?? [];
@@ -74,37 +79,60 @@ class _RideResultsScreenState extends State<RideResultsScreen> {
             itemBuilder: (context, index) {
               var data = filteredRides[index].data() as Map<String, dynamic>;
               DateTime dep = (data['departure_time'] as Timestamp).toDate();
+              
+              // --- CHECK IF THIS IS THE CURRENT USER'S RIDE ---
+              bool isOwnRide = data['driver_uid'] == currentUid;
+
               return GestureDetector(
-                onTap: () => Navigator.push(
+                // DISABLE NAVIGATION IF IT IS THE USER'S OWN RIDE
+                onTap: isOwnRide ? () {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text("You cannot book your own ride"))
+                  );
+                } : () => Navigator.push(
                   context, 
                   MaterialPageRoute(
                     builder: (_) => RideViewScreen(
                       rideId: filteredRides[index].id, 
                       rideData: data,
-                      // PASSING SEARCHED LOCATIONS HERE
                       passengerSource: widget.source,
                       passengerDestination: widget.destination,
                     )
                   )
                 ),
-                child: Card(
-                  margin: const EdgeInsets.only(bottom: 12),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-                  child: Padding(
-                    padding: const EdgeInsets.all(15),
-                    child: Column(
-                      children: [
-                        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                          Text(DateFormat('h:mm a').format(dep), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                          Text("₹${data['price_per_seat']}", style: TextStyle(color: primaryGreen, fontWeight: FontWeight.bold, fontSize: 18)),
-                        ]),
-                        const SizedBox(height: 10),
-                        Row(children: [const Icon(Icons.circle, size: 10, color: Colors.grey), const SizedBox(width: 10), Expanded(child: Text(data['source']['name'], overflow: TextOverflow.ellipsis))]),
-                        const SizedBox(height: 10),
-                        Row(children: [const Icon(Icons.location_on, size: 12, color: Colors.red), const SizedBox(width: 10), Expanded(child: Text(data['destination']['name'], overflow: TextOverflow.ellipsis))]),
-                        const Divider(),
-                        Row(children: [Text("${data['available_seats']} seats left", style: const TextStyle(color: Colors.orange, fontWeight: FontWeight.bold, fontSize: 12))]),
-                      ],
+                child: Opacity(
+                  // Slightly dim the card if it's the driver's own ride
+                  opacity: isOwnRide ? 0.7 : 1.0,
+                  child: Card(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(15),
+                      // Add a border if it's the driver's own ride
+                      side: isOwnRide ? BorderSide(color: primaryGreen, width: 1) : BorderSide.none,
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(15),
+                      child: Column(
+                        children: [
+                          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                            Text(DateFormat('h:mm a').format(dep), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                Text("₹${data['price_per_seat']}", style: TextStyle(color: primaryGreen, fontWeight: FontWeight.bold, fontSize: 18)),
+                                if (isOwnRide)
+                                  Text("YOUR RIDE", style: TextStyle(color: primaryGreen, fontSize: 10, fontWeight: FontWeight.bold)),
+                              ],
+                            ),
+                          ]),
+                          const SizedBox(height: 10),
+                          Row(children: [const Icon(Icons.circle, size: 10, color: Colors.grey), const SizedBox(width: 10), Expanded(child: Text(data['source']['name'], overflow: TextOverflow.ellipsis))]),
+                          const SizedBox(height: 10),
+                          Row(children: [const Icon(Icons.location_on, size: 12, color: Colors.red), const SizedBox(width: 10), Expanded(child: Text(data['destination']['name'], overflow: TextOverflow.ellipsis))]),
+                          const Divider(),
+                          Row(children: [Text("${data['available_seats']} seats left", style: const TextStyle(color: Colors.orange, fontWeight: FontWeight.bold, fontSize: 12))]),
+                        ],
+                      ),
                     ),
                   ),
                 ),

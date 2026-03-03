@@ -1,17 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+
+// Dashboard & Setup Imports
 import '../../passenger/search_ride.dart';
 import 'driver_dashboard.dart';
 import '../../driver_setup/driver_setup_controller.dart';
 import '../inbox/inbox_page.dart';
-import '../../../ride/passenger/passenger_moving_screen.dart';
-import '../../../ride/driver/ride_moving_screen.dart';
-import '../../../ride/driver/no_passenger_nav_screen.dart';// NEW SPLIT RIDE IMPORTS
-import '/screens/ride/driver/driver_live_tracking.dart';
 
-//  /screens/ride/driver/driver_live_tracking.dart';
-import '/screens/ride/passenger/passenger_live_tracking.dart';
+// THE REFACTORED BANNER WIDGET
+import '../../../../widgets/today_ride_banner.dart';
 
 // Enum to track what the Home Tab is currently showing
 enum HomeViewState { selection, passenger, driver }
@@ -26,7 +24,7 @@ class HomeModeSelection extends StatefulWidget {
 class _HomeModeSelectionState extends State<HomeModeSelection> {
   HomeViewState _currentView = HomeViewState.selection;
 
-  // --- STATE VARIABLES FOR ONE-TIME CHECK ---
+  // --- STATE VARIABLES ---
   String _driverStatus = 'loading';
   bool _isLoadingStatus = true;
   String _firstName = "Traveler";
@@ -37,7 +35,7 @@ class _HomeModeSelectionState extends State<HomeModeSelection> {
     _fetchDriverStatus();
   }
 
-  // --- 1. FETCH STATUS ON LANDING (RUNS ONCE) ---
+  // --- 1. FETCH STATUS ON LANDING ---
   Future<void> _fetchDriverStatus() async {
     try {
       final user = FirebaseAuth.instance.currentUser;
@@ -110,6 +108,8 @@ class _HomeModeSelectionState extends State<HomeModeSelection> {
   }
 
   Widget _buildBody() {
+    final String uid = FirebaseAuth.instance.currentUser?.uid ?? "";
+
     switch (_currentView) {
       case HomeViewState.passenger:
         return Stack(
@@ -139,7 +139,9 @@ class _HomeModeSelectionState extends State<HomeModeSelection> {
       default:
         return Column(
           children: [
-            _buildActiveRideBanner(),
+            // --- CALLING THE EXTERNAL WIDGET ---
+            TodayRideBanner(uid: uid),
+            
             Expanded(child: _buildSelectionView()),
           ],
         );
@@ -214,175 +216,8 @@ class _HomeModeSelectionState extends State<HomeModeSelection> {
             );
           },
         ),
-        const SizedBox(width: 10),
+        const SizedBox(width: 15),
       ],
-    );
-  }
-
-  // --- UPDATED: TODAY'S ACTIVE RIDE BANNER WITH SPLIT NAVIGATION ---
-  // --- UPDATED: TODAY'S ACTIVE RIDE BANNER WITH STATUS CHECKING ---
-  Widget _buildActiveRideBanner() {
-    final String uid = FirebaseAuth.instance.currentUser?.uid ?? "";
-    final now = DateTime.now();
-    final startOfDay = Timestamp.fromDate(
-      DateTime(now.year, now.month, now.day),
-    );
-    final endOfDay = Timestamp.fromDate(
-      DateTime(now.year, now.month, now.day, 23, 59),
-    );
-
-    return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('rides')
-          .where('departure_time', isGreaterThanOrEqualTo: startOfDay)
-          .where('departure_time', isLessThanOrEqualTo: endOfDay)
-          .snapshots(),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData || snapshot.data!.docs.isEmpty)
-          return const SizedBox.shrink();
-
-        var myRideDoc = snapshot.data!.docs.where((doc) {
-          var data = doc.data() as Map<String, dynamic>;
-          List passengers = data['passengers'] ?? [];
-          return data['driver_uid'] == uid || passengers.contains(uid);
-        }).toList();
-
-        if (myRideDoc.isEmpty) return const SizedBox.shrink();
-
-        var rideData = myRideDoc.first.data() as Map<String, dynamic>;
-        var rideId = myRideDoc.first.id;
-        bool isDriver = rideData['driver_uid'] == uid;
-
-        return GestureDetector(
-          onTap: () {
-            if (isDriver) {
-              // --- DRIVER LOGIC ---
-              List passengers = rideData['passengers'] ?? [];
-
-              // NEW CHECK: If no passengers have booked yet
-              if (passengers.isEmpty) {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => NoPassengerNavScreen(
-                      rideId: rideId,
-                      rideData: rideData,
-                    ),
-                  ),
-                );
-                return; // Exit function so it doesn't run the logic below
-              }
-
-              // --- EXISTING LOGIC: If passengers exist, check pickup status ---
-              Map<String, dynamic> routes = rideData['passenger_routes'] ?? {};
-
-              bool anyPendingPickup = false;
-              for (var pId in passengers) {
-                // If we don't have route data for a passenger yet, or they aren't verified
-                if (routes[pId] == null ||
-                    routes[pId]['ride_status'] != 'security_completed') {
-                  anyPendingPickup = true;
-                  break;
-                }
-              }
-
-              if (anyPendingPickup) {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) =>
-                        DriverLiveTracking(rideData: rideData, rideId: rideId),
-                  ),
-                );
-              } else {
-                // If all passengers are verified, go to moving screen
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) =>
-                        RideMovingScreen(rideId: rideId, rideData: rideData),
-                  ),
-                );
-              }
-            } else {
-              // --- PASSENGER LOGIC (Unchanged) ---
-              Map<String, dynamic> routes = rideData['passenger_routes'] ?? {};
-              String myStatus = routes[uid] != null
-                  ? (routes[uid]['ride_status'] ?? 'approved')
-                  : 'approved';
-
-              if (myStatus == 'security_completed') {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => PassengerMovingScreen(
-                      rideId: rideId,
-                      rideData: rideData,
-                    ),
-                  ),
-                );
-              } else {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => PassengerLiveTracking(
-                      rideData: rideData,
-                      rideId: rideId,
-                    ),
-                  ),
-                );
-              }
-            }
-          },
-          // ... rest of the banner UI code
-          child: Container(
-            margin: const EdgeInsets.fromLTRB(20, 10, 20, 0),
-            padding: const EdgeInsets.all(15),
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                colors: [Color(0xFF2B5145), Color(0xFF11A860)],
-              ),
-              borderRadius: BorderRadius.circular(15),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.green.withOpacity(0.2),
-                  blurRadius: 10,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.stars, color: Colors.white, size: 28),
-                const SizedBox(width: 12),
-                const Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        "You have a ride today!",
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      Text(
-                        "Tap to open live coordination",
-                        style: TextStyle(color: Colors.white70, fontSize: 12),
-                      ),
-                    ],
-                  ),
-                ),
-                const Icon(
-                  Icons.arrow_forward_ios,
-                  color: Colors.white,
-                  size: 16,
-                ),
-              ],
-            ),
-          ),
-        );
-      },
     );
   }
 
@@ -390,23 +225,11 @@ class _HomeModeSelectionState extends State<HomeModeSelection> {
     Widget? statusBadge;
     if (!_isLoadingStatus) {
       if (_driverStatus == 'pending') {
-        statusBadge = _buildBadge(
-          Icons.hourglass_top,
-          "Pending",
-          Colors.orange,
-        );
+        statusBadge = _buildBadge(Icons.hourglass_top, "Pending", Colors.orange);
       } else if (_driverStatus == 'rejected') {
-        statusBadge = _buildBadge(
-          Icons.error_outline,
-          "Action Needed",
-          Colors.red,
-        );
+        statusBadge = _buildBadge(Icons.error_outline, "Action Needed", Colors.red);
       } else if (_driverStatus == 'approved') {
-        statusBadge = _buildBadge(
-          Icons.check_circle,
-          "Verified",
-          const Color(0xFF11A860),
-        );
+        statusBadge = _buildBadge(Icons.check_circle, "Verified", const Color(0xFF11A860));
       } else {
         statusBadge = _buildBadge(Icons.star, "Start Earning", Colors.amber);
       }
@@ -423,8 +246,7 @@ class _HomeModeSelectionState extends State<HomeModeSelection> {
               icon: Icons.search,
               color: const Color(0xFF11A860),
               badge: _buildBadge(Icons.bolt, "Fastest", Colors.orange),
-              onTap: () =>
-                  setState(() => _currentView = HomeViewState.passenger),
+              onTap: () => setState(() => _currentView = HomeViewState.passenger),
             ),
           ),
           const SizedBox(height: 20),
@@ -451,27 +273,14 @@ class _HomeModeSelectionState extends State<HomeModeSelection> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.1),
-            blurRadius: 4,
-            offset: const Offset(0, 2),
-          ),
-        ],
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 4, offset: const Offset(0, 2))],
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(icon, size: 14, color: color),
           const SizedBox(width: 5),
-          Text(
-            text,
-            style: TextStyle(
-              color: color,
-              fontWeight: FontWeight.bold,
-              fontSize: 11,
-            ),
-          ),
+          Text(text, style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 11)),
         ],
       ),
     );
@@ -492,24 +301,14 @@ class _HomeModeSelectionState extends State<HomeModeSelection> {
         decoration: BoxDecoration(
           color: color,
           borderRadius: BorderRadius.circular(25),
-          boxShadow: [
-            BoxShadow(
-              color: color.withOpacity(0.4),
-              blurRadius: 10,
-              offset: const Offset(0, 5),
-            ),
-          ],
+          boxShadow: [BoxShadow(color: color.withOpacity(0.4), blurRadius: 10, offset: const Offset(0, 5))],
         ),
         child: Stack(
           children: [
             Positioned(
               right: -20,
               bottom: -20,
-              child: Icon(
-                icon,
-                size: 150,
-                color: Colors.white.withOpacity(0.1),
-              ),
+              child: Icon(icon, size: 150, color: Colors.white.withOpacity(0.1)),
             ),
             if (badge != null) Positioned(top: 20, right: 20, child: badge),
             Padding(
@@ -520,46 +319,21 @@ class _HomeModeSelectionState extends State<HomeModeSelection> {
                 children: [
                   Container(
                     padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.2),
-                      shape: BoxShape.circle,
-                    ),
+                    decoration: BoxDecoration(color: Colors.white.withOpacity(0.2), shape: BoxShape.circle),
                     child: Icon(icon, color: Colors.white, size: 30),
                   ),
                   const Spacer(),
-                  Text(
-                    title,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
+                  Text(title, style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 5),
-                  Text(
-                    subtitle,
-                    style: const TextStyle(color: Colors.white70, fontSize: 14),
-                  ),
+                  Text(subtitle, style: const TextStyle(color: Colors.white70, fontSize: 14)),
                   const SizedBox(height: 20),
                   Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 15,
-                      vertical: 8,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(20),
-                    ),
+                    padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 8),
+                    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20)),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text(
-                          "Continue",
-                          style: TextStyle(
-                            color: color,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
+                        Text("Continue", style: TextStyle(color: color, fontWeight: FontWeight.bold)),
                         const SizedBox(width: 5),
                         Icon(Icons.arrow_forward, size: 16, color: color),
                       ],

@@ -61,39 +61,77 @@ class _DriverSecurityVerifyState extends State<DriverSecurityVerify> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.white,
-      appBar: AppBar(title: const Text("Verify Passenger"), elevation: 0),
-      body: StreamBuilder<DocumentSnapshot>(
-        stream: FirebaseFirestore.instance.collection('rides').doc(widget.rideId).snapshots(),
-        builder: (context, snapshot) {
-          if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
-          String correctPin = snapshot.data!.get('ride_otp') ?? "";
+Widget build(BuildContext context) {
+  return Scaffold(
+    backgroundColor: Colors.white,
+    appBar: AppBar(title: const Text("Verify Passenger"), elevation: 0),
+    body: StreamBuilder<DocumentSnapshot>(
+      stream: FirebaseFirestore.instance.collection('rides').doc(widget.rideId).snapshots(),
+      builder: (context, snapshot) {
+        // 1. Handle Loading state
+        if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
 
-          return Padding(
-            padding: const EdgeInsets.all(30),
+        // 2. Safely get data map
+        var data = snapshot.data!.data() as Map<String, dynamic>?;
+
+        // 3. Check if 'ride_otp' exists. If not, wait gracefully.
+        if (data == null || !data.containsKey('ride_otp')) {
+          return Center(
             child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Icon(Icons.lock_person, size: 80, color: Color(0xFF11A860)),
+                const CircularProgressIndicator(color: Colors.orange),
                 const SizedBox(height: 20),
-                const Text("Enter 4-digit PIN", style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 40),
-                TextField(
-                  controller: _pinController,
-                  keyboardType: TextInputType.number,
-                  maxLength: 4,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 40, letterSpacing: 20, fontWeight: FontWeight.bold),
-                  onChanged: (v) => _verifyPin(v, correctPin),
-                  decoration: const InputDecoration(counterText: "", hintText: "0000"),
+                const Text(
+                  "Waiting for passenger to generate PIN...",
+                  style: TextStyle(color: Colors.grey, fontWeight: FontWeight.w500),
                 ),
-                if (_isVerifying) const Padding(padding: EdgeInsets.all(20), child: CircularProgressIndicator()),
+                const SizedBox(height: 10),
+                const Text(
+                  "Please ask the passenger to open their app.",
+                  style: TextStyle(color: Colors.grey, fontSize: 12),
+                ),
               ],
             ),
           );
-        },
-      ),
-    );
-  }
+        }
+
+        // 4. If field exists, proceed with logic
+        String correctPin = data['ride_otp'].toString();
+
+        return Padding(
+          padding: const EdgeInsets.all(30),
+          child: Column(
+            children: [
+              const Icon(Icons.lock_person, size: 80, color: Color(0xFF11A860)),
+              const SizedBox(height: 20),
+              const Text("Enter 4-digit PIN", style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+              const Text("Ask the passenger for the code shown on their screen", 
+                textAlign: TextAlign.center, style: TextStyle(color: Colors.grey, fontSize: 13)),
+              const SizedBox(height: 40),
+              TextField(
+                controller: _pinController,
+                keyboardType: TextInputType.number,
+                maxLength: 4,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 40, letterSpacing: 20, fontWeight: FontWeight.bold),
+                onChanged: (v) => _verifyPin(v, correctPin), // Pass the pin to your existing logic
+                decoration: const InputDecoration(
+                  counterText: "", 
+                  hintText: "0000",
+                  hintStyle: TextStyle(color: Color(0xFFEEEEEE))
+                ),
+              ),
+              if (_isVerifying) 
+                const Padding(
+                  padding: EdgeInsets.all(20), 
+                  child: CircularProgressIndicator()
+                ),
+            ],
+          ),
+        );
+      },
+    ),
+  );
+}
 }

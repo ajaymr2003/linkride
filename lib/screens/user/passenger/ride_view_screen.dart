@@ -112,14 +112,13 @@ class _RideViewScreenState extends State<RideViewScreen> {
     }
   }
 
-  // --- SEND REQUEST LOGIC WITH FCM PUSH NOTIFICATIONS ---
+  // --- SEND REQUEST LOGIC ---
   Future<void> _sendRequest() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
     setState(() => _isRequesting = true);
     try {
-      // 1. Fetch Passenger name and Driver FCM token
       DocumentSnapshot passengerDoc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
       DocumentSnapshot driverDoc = await FirebaseFirestore.instance.collection('users').doc(widget.rideData['driver_uid']).get();
 
@@ -127,9 +126,7 @@ class _RideViewScreenState extends State<RideViewScreen> {
       String? driverToken = driverDoc.exists ? driverDoc.get('fcm_token') : null;
       String destinationName = widget.passengerDestination['name'] ?? "Destination";
 
-      // 2. Transaction: Create Booking Entry and In-App Notification
       await FirebaseFirestore.instance.runTransaction((transaction) async {
-        // A. Create the Booking entry in 'bookings' collection
         DocumentReference bookingRef = FirebaseFirestore.instance.collection('bookings').doc();
         transaction.set(bookingRef, {
           'ride_id': widget.rideId,
@@ -145,7 +142,6 @@ class _RideViewScreenState extends State<RideViewScreen> {
           'ride_date': widget.rideData['departure_time'],
         });
 
-        // B. Create In-App Notification record for the Driver's inbox
         DocumentReference notifRef = FirebaseFirestore.instance.collection('notifications').doc();
         transaction.set(notifRef, {
           'uid': widget.rideData['driver_uid'],
@@ -157,7 +153,6 @@ class _RideViewScreenState extends State<RideViewScreen> {
         });
       });
 
-      // 3. Trigger External Push Notification to Driver's device
       if (driverToken != null && driverToken.isNotEmpty) {
         await FCMService.sendPushNotification(
           token: driverToken,
@@ -177,8 +172,8 @@ class _RideViewScreenState extends State<RideViewScreen> {
             actions: [
               TextButton(
                 onPressed: () {
-                  Navigator.pop(ctx); // Close Dialog
-                  Navigator.pop(context); // Go back to results
+                  Navigator.pop(ctx);
+                  Navigator.pop(context);
                 },
                 child: const Text("OK", style: TextStyle(fontWeight: FontWeight.bold)),
               )
@@ -199,6 +194,9 @@ class _RideViewScreenState extends State<RideViewScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final String currentUid = FirebaseAuth.instance.currentUser?.uid ?? "";
+    bool isOwnRide = widget.rideData['driver_uid'] == currentUid;
+
     final DateTime depTime = (widget.rideData['departure_time'] as Timestamp).toDate();
     final LatLng start = LatLng(widget.passengerSource['lat'], widget.passengerSource['lng']);
     final LatLng end = LatLng(widget.passengerDestination['lat'], widget.passengerDestination['lng']);
@@ -340,23 +338,30 @@ class _RideViewScreenState extends State<RideViewScreen> {
             child: SizedBox(
               width: double.infinity,
               height: 55,
-              child: _existingStatus != null
+              child: isOwnRide
                   ? ElevatedButton(
                       onPressed: null,
                       style: ElevatedButton.styleFrom(backgroundColor: Colors.grey[200]),
-                      child: Text("REQUEST ${_existingStatus!.toUpperCase()}",
-                          style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.bold)),
+                      child: const Text("THIS IS YOUR RIDE",
+                          style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold)),
                     )
-                  : ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                          backgroundColor: primaryGreen,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15))),
-                      onPressed: _isRequesting ? null : _sendRequest,
-                      child: _isRequesting
-                          ? const CircularProgressIndicator(color: Colors.white)
-                          : const Text("REQUEST SEAT",
-                              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
-                    ),
+                  : _existingStatus != null
+                      ? ElevatedButton(
+                          onPressed: null,
+                          style: ElevatedButton.styleFrom(backgroundColor: Colors.grey[200]),
+                          child: Text("REQUEST ${_existingStatus!.toUpperCase()}",
+                              style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.bold)),
+                        )
+                      : ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                              backgroundColor: primaryGreen,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15))),
+                          onPressed: _isRequesting ? null : _sendRequest,
+                          child: _isRequesting
+                              ? const CircularProgressIndicator(color: Colors.white)
+                              : const Text("REQUEST SEAT",
+                                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                        ),
             ),
           )
         ],
