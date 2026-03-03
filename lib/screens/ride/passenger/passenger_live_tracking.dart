@@ -8,6 +8,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:http/http.dart' as http;
 import 'package:geolocator/geolocator.dart';
+import 'package:intl/intl.dart'; 
 import 'passenger_security_display.dart';
 
 class PassengerLiveTracking extends StatefulWidget {
@@ -33,6 +34,7 @@ class _PassengerLiveTrackingState extends State<PassengerLiveTracking> {
 
   String _distance = "--";
   String _duration = "--";
+  String _arrivalTime = "--:--"; 
 
   StreamSubscription<Position>? _myLocationSub;
   StreamSubscription<DatabaseEvent>? _driverLocationSub;
@@ -84,35 +86,34 @@ class _PassengerLiveTrackingState extends State<PassengerLiveTracking> {
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         final route = data['routes'][0];
+        final double durationSeconds = route['duration'].toDouble();
+        final DateTime arrivalTime = DateTime.now().add(Duration(seconds: durationSeconds.toInt()));
+
         if (mounted) {
           setState(() {
             _driverRoutePoints = (route['geometry']['coordinates'] as List).map((c) => LatLng(c[1], c[0])).toList();
             _distance = "${(route['distance'] / 1000).toStringAsFixed(1)} km";
-            _duration = "${(route['duration'] / 60).toStringAsFixed(0)} min";
+            _duration = "${(durationSeconds / 60).toStringAsFixed(0)} min";
+            _arrivalTime = DateFormat('h:mm a').format(arrivalTime);
           });
         }
       }
     } catch (e) {}
   }
 
-  void _confirmDriverArrived(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text("Driver Arrived?"),
-        content: const Text("Is the driver at your location? Confirming will generate the security PIN to start your ride."),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("NO")),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              Navigator.push(context, MaterialPageRoute(builder: (_) => PassengerSecurityDisplay(rideId: widget.rideId)));
-            }, 
-            child: const Text("YES, DRIVER IS HERE", style: TextStyle(color: Color(0xFF11A860), fontWeight: FontWeight.bold))
-          ),
-        ],
-      ),
-    );
+  // Logic: Mark passenger arrival in DB and navigate
+  Future<void> _handlePassengerArrived() async {
+    try {
+      await FirebaseFirestore.instance.collection('rides').doc(widget.rideId).update({
+        'passenger_routes.$_myUid.passenger_clicked_arrived': true,
+      });
+
+      if (mounted) {
+        Navigator.push(context, MaterialPageRoute(builder: (_) => PassengerSecurityDisplay(rideId: widget.rideId)));
+      }
+    } catch (e) {
+      debugPrint("Error updating arrival: $e");
+    }
   }
 
   @override
@@ -131,12 +132,11 @@ class _PassengerLiveTrackingState extends State<PassengerLiveTracking> {
           if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
           var ride = snapshot.data!.data() as Map<String, dynamic>;
           
-          try {
-             var myRoute = ride['passenger_routes'][_myUid]['pickup'];
-             _pickupPos = LatLng(myRoute['lat'], myRoute['lng']);
-          } catch (e) {
-             _pickupPos = LatLng(ride['source']['lat'], ride['source']['lng']);
-          }
+          var myRouteData = ride['passenger_routes'][_myUid];
+          _pickupPos = LatLng(myRouteData['pickup']['lat'], myRouteData['pickup']['lng']);
+
+          // FETCH FLAG: Has driver marked arrival?
+          bool isDriverArrived = myRouteData['driver_clicked_arrived'] ?? false;
 
           return Stack(
             children: [
@@ -150,15 +150,48 @@ class _PassengerLiveTrackingState extends State<PassengerLiveTracking> {
                 children: [
                   TileLayer(urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', userAgentPackageName: 'com.example.linkride'),
                   if (_driverRoutePoints.isNotEmpty) PolylineLayer(polylines: [Polyline(points: _driverRoutePoints, color: Colors.blue, strokeWidth: 5)]),
-                  if (_myPos != null && _pickupPos != null) PolylineLayer(polylines: [Polyline(points: [_myPos!, _pickupPos!], color: Colors.orange, strokeWidth: 3, isDotted: true)]),
                   MarkerLayer(markers: [
                     if (_driverPos != null) Marker(point: _driverPos!, width: 80, height: 80, child: Column(children: [_labelContainer("Driver", Colors.blue), const Icon(Icons.directions_car, color: Colors.blue, size: 30)])),
-                    Marker(point: _pickupPos!, width: 130, height: 80, child: Column(children: [_labelContainer("PICKUP LOCATION", Colors.red), const Icon(Icons.location_on, color: Colors.red, size: 40)])),
-                    if (_myPos != null) Marker(point: _myPos!, width: 110, height: 80, child: Column(children: [_labelContainer("YOUR LOCATION", Colors.orange), const Icon(Icons.person_pin_circle, color: Colors.orange, size: 35)])),
+                    Marker(point: _pickupPos!, width: 130, height: 80, child: Column(children: [_labelContainer("PICKUP", Colors.red), const Icon(Icons.location_on, color: Colors.red, size: 40)])),
+                    if (_myPos != null) Marker(point: _myPos!, width: 110, height: 80, child: Column(children: [_labelContainer("YOU", Colors.orange), const Icon(Icons.person_pin_circle, color: Colors.orange, size: 35)])),
                   ]),
                 ],
               ),
+              
+              // Floating Back Button
               Positioned(top: 50, left: 20, child: CircleAvatar(backgroundColor: Colors.white, child: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => Navigator.pop(context)))),
+
+              // --- ARRIVAL NOTIFICATION BANNER ---
+              if (isDriverArrived)
+                Positioned(
+                  top: 110, left: 20, right: 20,
+                  child: Container(
+                    padding: const EdgeInsets.all(15),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE8F5E9),
+                      borderRadius: BorderRadius.circular(15),
+                      border: Border.all(color: Colors.green, width: 2),
+                      boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 10)],
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.check_circle, color: Colors.green, size: 30),
+                        const SizedBox(width: 15),
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text("Driver is here!", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.green, fontSize: 16)),
+                              Text("Look for the car at your pickup point.", style: TextStyle(color: Colors.black54, fontSize: 12)),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+              // Bottom Panel
               Positioned(
                 bottom: 0, left: 0, right: 0,
                 child: Container(
@@ -173,7 +206,8 @@ class _PassengerLiveTrackingState extends State<PassengerLiveTracking> {
                         mainAxisAlignment: MainAxisAlignment.spaceAround,
                         children: [
                           _metric("Distance", _distance),
-                          _metric("Arrival in", _duration),
+                          _metric("Duration", _duration),
+                          _metric("Arrival At", _arrivalTime),
                         ],
                       ),
                       const SizedBox(height: 25),
@@ -183,9 +217,14 @@ class _PassengerLiveTrackingState extends State<PassengerLiveTracking> {
                           const SizedBox(width: 10),
                           Expanded(
                             child: ElevatedButton(
-                              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF11A860)),
-                              onPressed: () => _confirmDriverArrived(context),
-                              child: const Text("DRIVER ARRIVED", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: isDriverArrived ? Colors.orange : const Color(0xFF11A860),
+                              ),
+                              onPressed: _handlePassengerArrived,
+                              child: Text(
+                                isDriverArrived ? "GO TO PIN" : "DRIVER ARRIVED", 
+                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)
+                              ),
                             ),
                           ),
                         ],

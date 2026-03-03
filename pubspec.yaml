@@ -11,6 +11,8 @@ dependencies:
   flutter:
     sdk: flutter
   
+
+  telephony: ^0.2.0
   # Networking & Maps
   http: ^1.2.0
   googleapis_auth: ^1.4.1
