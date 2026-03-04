@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'ride_moving_screen.dart';
+import 'driver_live_tracking.dart'; // Import the tracking screen
 
 class DriverSecurityVerify extends StatefulWidget {
   final String rideId;
@@ -23,13 +24,13 @@ class _DriverSecurityVerifyState extends State<DriverSecurityVerify> {
 
     if (enteredPin == correctPin) {
       try {
-        // 1. Update Firestore
+        // 1. Update Firestore status to security_completed (this onboard the passenger)
         await FirebaseFirestore.instance.collection('rides').doc(widget.rideId).update({
           'passenger_routes.${widget.passengerUid}.ride_status': 'security_completed',
           'ride_status': 'ongoing' 
         });
 
-        // 2. Fetch the LATEST ride data so the next screen isn't using stale data
+        // 2. Fetch the LATEST ride data
         DocumentSnapshot updatedSnap = await FirebaseFirestore.instance
             .collection('rides')
             .doc(widget.rideId)
@@ -38,7 +39,7 @@ class _DriverSecurityVerifyState extends State<DriverSecurityVerify> {
         Map<String, dynamic> updatedData = updatedSnap.data() as Map<String, dynamic>;
 
         if (mounted) {
-          // 3. Use pushReplacement to prevent going back to the PIN screen
+          // 3. Move to the next stage (Moving with passenger onboard)
           Navigator.pushReplacement(
             context, 
             MaterialPageRoute(
@@ -54,84 +55,104 @@ class _DriverSecurityVerifyState extends State<DriverSecurityVerify> {
         setState(() => _isVerifying = false);
       }
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Incorrect PIN")));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Incorrect PIN"), backgroundColor: Colors.red));
       _pinController.clear();
       setState(() => _isVerifying = false);
     }
   }
 
   @override
-Widget build(BuildContext context) {
-  return Scaffold(
-    backgroundColor: Colors.white,
-    appBar: AppBar(title: const Text("Verify Passenger"), elevation: 0),
-    body: StreamBuilder<DocumentSnapshot>(
-      stream: FirebaseFirestore.instance.collection('rides').doc(widget.rideId).snapshots(),
-      builder: (context, snapshot) {
-        // 1. Handle Loading state
-        if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        title: const Text("Verify Passenger", style: TextStyle(fontWeight: FontWeight.bold)), 
+        elevation: 0,
+        backgroundColor: Colors.white,
+        foregroundColor: Colors.black,
+        // BACK BUTTON LOGIC:
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_new, size: 20),
+          onPressed: () {
+            // This returns the driver to the DriverLiveTracking map screen
+            Navigator.pop(context);
+          },
+        ),
+      ),
+      body: StreamBuilder<DocumentSnapshot>(
+        stream: FirebaseFirestore.instance.collection('rides').doc(widget.rideId).snapshots(),
+        builder: (context, snapshot) {
+          if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
 
-        // 2. Safely get data map
-        var data = snapshot.data!.data() as Map<String, dynamic>?;
+          var data = snapshot.data!.data() as Map<String, dynamic>?;
 
-        // 3. Check if 'ride_otp' exists. If not, wait gracefully.
-        if (data == null || !data.containsKey('ride_otp')) {
-          return Center(
+          // If passenger hasn't opened their screen yet to generate the OTP
+          if (data == null || !data.containsKey('ride_otp')) {
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const CircularProgressIndicator(color: Colors.orange),
+                  const SizedBox(height: 20),
+                  const Text(
+                    "Waiting for passenger...",
+                    style: TextStyle(color: Colors.black87, fontWeight: FontWeight.bold, fontSize: 18),
+                  ),
+                  const SizedBox(height: 10),
+                  const Text(
+                    "Ask the passenger to open their security screen.",
+                    style: TextStyle(color: Colors.grey, fontSize: 13),
+                  ),
+                ],
+              ),
+            );
+          }
+
+          String correctPin = data['ride_otp'].toString();
+
+          return SingleChildScrollView(
+            padding: const EdgeInsets.all(30),
             child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const CircularProgressIndicator(color: Colors.orange),
                 const SizedBox(height: 20),
-                const Text(
-                  "Waiting for passenger to generate PIN...",
-                  style: TextStyle(color: Colors.grey, fontWeight: FontWeight.w500),
-                ),
+                const Icon(Icons.verified_user, size: 80, color: Color(0xFF11A860)),
+                const SizedBox(height: 25),
+                const Text("Enter Security PIN", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 10),
                 const Text(
-                  "Please ask the passenger to open their app.",
-                  style: TextStyle(color: Colors.grey, fontSize: 12),
+                  "Ask the passenger for the 4-digit code shown on their phone to confirm the pickup.", 
+                  textAlign: TextAlign.center, 
+                  style: TextStyle(color: Colors.grey, fontSize: 14, height: 1.5)
                 ),
+                const SizedBox(height: 50),
+                
+                // PIN Input field
+                TextField(
+                  controller: _pinController,
+                  keyboardType: TextInputType.number,
+                  maxLength: 4,
+                  textAlign: TextAlign.center,
+                  autofocus: true, // Automatically pops the keyboard
+                  style: const TextStyle(fontSize: 45, letterSpacing: 25, fontWeight: FontWeight.bold, color: Color(0xFF2B5145)),
+                  onChanged: (v) => _verifyPin(v, correctPin),
+                  decoration: InputDecoration(
+                    counterText: "", 
+                    hintText: "••••",
+                    hintStyle: TextStyle(color: Colors.grey.shade200),
+                    border: InputBorder.none,
+                    enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.grey.shade100, width: 2)),
+                    focusedBorder: const UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFF11A860), width: 2)),
+                  ),
+                ),
+
+                const SizedBox(height: 40),
+                if (_isVerifying) 
+                  const CircularProgressIndicator(color: Color(0xFF11A860)),
               ],
             ),
           );
-        }
-
-        // 4. If field exists, proceed with logic
-        String correctPin = data['ride_otp'].toString();
-
-        return Padding(
-          padding: const EdgeInsets.all(30),
-          child: Column(
-            children: [
-              const Icon(Icons.lock_person, size: 80, color: Color(0xFF11A860)),
-              const SizedBox(height: 20),
-              const Text("Enter 4-digit PIN", style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-              const Text("Ask the passenger for the code shown on their screen", 
-                textAlign: TextAlign.center, style: TextStyle(color: Colors.grey, fontSize: 13)),
-              const SizedBox(height: 40),
-              TextField(
-                controller: _pinController,
-                keyboardType: TextInputType.number,
-                maxLength: 4,
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 40, letterSpacing: 20, fontWeight: FontWeight.bold),
-                onChanged: (v) => _verifyPin(v, correctPin), // Pass the pin to your existing logic
-                decoration: const InputDecoration(
-                  counterText: "", 
-                  hintText: "0000",
-                  hintStyle: TextStyle(color: Color(0xFFEEEEEE))
-                ),
-              ),
-              if (_isVerifying) 
-                const Padding(
-                  padding: EdgeInsets.all(20), 
-                  child: CircularProgressIndicator()
-                ),
-            ],
-          ),
-        );
-      },
-    ),
-  );
-}
+        },
+      ),
+    );
+  }
 }

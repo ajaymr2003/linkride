@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Guardian Mode - Trip Tracking</title>
+    
+    <!-- External Assets -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    
+    <style>
+        :root { --primary: #11A860; --dark: #2B5145; --danger: #e74c3c; --bg: #f8f9fa; }
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', sans-serif; }
+        body { background: var(--bg); height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+        
+        #map { flex: 1; width: 100%; z-index: 1; }
+
+        /* UI Overlays */
+        .top-bar { position: fixed; top: 15px; left: 15px; right: 15px; z-index: 1000; background: white; padding: 15px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); border-left: 6px solid var(--primary); display: flex; justify-content: space-between; align-items: center; }
+        .sos-tag { background: var(--danger); color: white; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: bold; animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+
+        .bottom-card { position: fixed; bottom: 0; left: 0; right: 0; z-index: 1000; background: white; border-radius: 25px 25px 0 0; padding: 25px; box-shadow: 0 -5px 20px rgba(0,0,0,0.1); max-height: 50vh; overflow-y: auto; }
+        
+        /* Typography */
+        .label { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; margin-bottom: 2px; }
+        .value { font-size: 16px; color: var(--dark); font-weight: 700; margin-bottom: 12px; }
+        
+        /* Trip Route Visual */
+        .route-container { margin: 15px 0; border-left: 2px dashed #ddd; padding-left: 20px; position: relative; }
+        .route-dot { position: absolute; left: -6px; width: 10px; height: 10px; border-radius: 50%; background: #ccc; }
+        .dot-top { top: 0; background: var(--primary); }
+        .dot-bottom { bottom: 0; background: var(--danger); }
+
+        .metric-row { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 15px; }
+        .metric-box { background: #f0f2f5; padding: 12px; border-radius: 10px; text-align: center; }
+
+        /* Buttons */
+        .btn-nav { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; padding: 15px; background: #4285F4; color: white; border: none; border-radius: 12px; font-weight: bold; font-size: 15px; cursor: pointer; text-decoration: none; margin-top: 20px; }
+        
+        .btn-refresh { background: white; color: var(--primary); border: 2px solid var(--primary); padding: 8px 16px; border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 13px; display: flex; align-items: center; gap: 6px; transition: all 0.3s ease; }
+        .btn-refresh:hover { background: var(--primary); color: white; }
+        .btn-refresh.loading { opacity: 0.6; pointer-events: none; }
+        .refresh-spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite; }
+        
+        .loading-screen { position: fixed; inset: 0; background: white; z-index: 9999; display: flex; flex-direction: column; justify-content: center; align-items: center; }
+        .spinner { width: 40px; height: 40px; border: 4px solid #f3f3f3; border-top: 4px solid var(--primary); border-radius: 50%; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+
+    <div id="loader" class="loading-screen">
+        <div class="spinner"></div>
+        <p style="margin-top: 15px; color: #666; font-weight: 600;">Connecting to Secure Trip...</p>
+    </div>
+
+    <div class="top-bar">
+        <div>
+            <div id="trip-status" style="font-weight: 800; font-size: 18px; color: var(--dark);">Tracking Active</div>
+            <div id="last-seen" style="font-size: 12px; color: #888;">Updating live location...</div>
+        </div>
+        <div style="display: flex; gap: 10px; align-items: center;">
+            <button id="refresh-btn" class="btn-refresh">
+                <i class="fas fa-sync-alt"></i> Refresh
+            </button>
+            <div class="sos-tag">LIVE SOS</div>
+        </div>
+    </div>
+
+    <div id="map"></div>
+
+    <div class="bottom-card">
+        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 15px;">
+            <i class="fas fa-user-shield" style="color: var(--primary);"></i>
+            <span style="font-weight: 700; color: #444;">Trip Information</span>
+        </div>
+
+        <!-- Passenger Data -->
+        <div class="label">Passenger</div>
+        <div class="value" id="passenger-name">Loading...</div>
+
+        <!-- Route Info -->
+        <div class="route-container">
+            <div class="route-dot dot-top"></div>
+            <div class="label">Pickup</div>
+            <div class="value" style="font-size: 14px;" id="pickup-name">---</div>
+            
+            <div class="route-dot dot-bottom"></div>
+            <div class="label">Destination</div>
+            <div class="value" style="font-size: 14px; margin-bottom: 0;" id="dropoff-name">---</div>
+        </div>
+
+        <div class="metric-row">
+            <div class="metric-box">
+                <div class="label">Distance Left</div>
+                <div class="value" style="margin: 0;" id="dist-val">-- km</div>
+            </div>
+            <div class="metric-box">
+                <div class="label">Reach Time</div>
+                <div class="value" style="margin: 0;" id="eta-val">--:--</div>
+            </div>
+        </div>
+
+        <div style="margin-top: 20px;">
+            <div class="label">Assigned Driver</div>
+            <div class="value" id="driver-name">---</div>
+        </div>
+
+        <a id="gmaps-link" href="#" target="_blank" class="btn-nav">
+            <i class="fab fa-google"></i> OPEN IN GOOGLE MAPS
+        </a>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+
+    <script>
+        const firebaseConfig = {
+            apiKey: "AIzaSyBvkBU65x76henG3m8AOrPlT6RCzS2qSt8",
+            databaseURL: "https://mainproject-c4112-default-rtdb.asia-southeast1.firebasedatabase.app",
+            projectId: "mainproject-c4112",
+            appId: "1:732530504308:web:fa39ae88bd505428f11721"
+        };
+
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.database();
+        const fs = firebase.firestore();
+
+        let map, marker, circle;
+        const urlParams = new URLSearchParams(window.location.search);
+        const uid = urlParams.get('uid');
+        let lastRefreshTime = null;
+        let currentDestLat = null;
+        let currentDestLng = null;
+        let refreshInterval = null;
+
+        function formatRelativeTime(timestamp) {
+            const now = Date.now();
+            const diff = now - timestamp;
+            const minutes = Math.floor(diff / 60000);
+            
+            if (minutes === 0) return "Just now";
+            if (minutes === 1) return "1 min ago";
+            if (minutes < 60) return minutes + " mins ago";
+            
+            const hours = Math.floor(minutes / 60);
+            if (hours === 1) return "1 hour ago";
+            return hours + " hours ago";
+        }
+
+        function updateLastRefreshTime() {
+            lastRefreshTime = Date.now();
+            document.getElementById('last-seen').innerText = formatRelativeTime(lastRefreshTime);
+        }
+
+        function updateRefreshDisplay() {
+            if (lastRefreshTime) {
+                document.getElementById('last-seen').innerText = formatRelativeTime(lastRefreshTime);
+            }
+        }
+
+        function initMap() {
+            map = L.map('map', { zoomControl: false }).setView([11.2588, 75.7804], 12);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(map);
+        }
+
+        async function loadFirestoreData() {
+            if (!uid) return;
+
+            try {
+                // 1. Find the active ride for this passenger
+                const rideSnap = await fs.collection('rides')
+                    .where('passengers', 'array-contains', uid)
+                    .where('ride_status', '==', 'ongoing')
+                    .limit(1).get();
+
+                if (!rideSnap.empty) {
+                    const ride = rideSnap.docs[0].data();
+                    const myRoute = ride.passenger_routes[uid];
+
+                    document.getElementById('passenger-name').innerText = myRoute.passenger_name || "User";
+                    document.getElementById('pickup-name').innerText = myRoute.pickup.name;
+                    document.getElementById('dropoff-name').innerText = myRoute.dropoff.name;
+
+                    // 2. Fetch Driver Name
+                    const driverSnap = await fs.collection('users').doc(ride.driver_uid).get();
+                    if (driverSnap.exists) {
+                        document.getElementById('driver-name').innerText = driverSnap.data().name;
+                    }
+
+                    // Start Tracking
+                    startLiveTracking(myRoute.dropoff.lat, myRoute.dropoff.lng);
+                } else {
+                    document.getElementById('loader').innerHTML = "⚠️ No Active Trip Found";
+                }
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        function startLiveTracking(destLat, destLng) {
+            currentDestLat = destLat;
+            currentDestLng = destLng;
+            const locRef = db.ref('user_locations/' + uid);
+
+            locRef.on('value', async (snapshot) => {
+                const data = snapshot.val();
+                if (!data) return;
+
+                const pos = [data.lat, data.lng];
+                
+                // Update UI Coordinates & Last Seen
+                updateLastRefreshTime();
+                document.getElementById('gmaps-link').href = `https://www.google.com/maps/search/?api=1&query=${data.lat},${data.lng}`;
+
+                // Update Marker
+                if (marker) {
+                    marker.setLatLng(pos);
+                    circle.setLatLng(pos);
+                } else {
+                    marker = L.marker(pos).addTo(map).bindPopup("Live Position").openPopup();
+                    circle = L.circle(pos, { radius: 100, color: '#11A860' }).addTo(map);
+                    map.setView(pos, 15);
+                    document.getElementById('loader').style.display = 'none';
+                }
+
+                // FETCH OSRM FOR DISTANCE/ETA
+                fetchMetrics(data.lat, data.lng, destLat, destLng);
+            });
+
+            // Set up periodic refresh every 5 seconds
+            if (refreshInterval) clearInterval(refreshInterval);
+            refreshInterval = setInterval(() => {
+                updateRefreshDisplay();
+            }, 1000);
+
+            // Manual refresh handler
+            document.getElementById('refresh-btn').addEventListener('click', manualRefresh);
+        }
+
+        async function manualRefresh() {
+            const btn = document.getElementById('refresh-btn');
+            btn.classList.add('loading');
+            btn.innerHTML = '<span class="refresh-spinner"></span> Refreshing...';
+
+            try {
+                // Force fetch latest location from Firebase
+                const locRef = db.ref('user_locations/' + uid);
+                const snapshot = await locRef.get();
+                const data = snapshot.val();
+                
+                if (data) {
+                    updateLastRefreshTime();
+                    fetchMetrics(data.lat, data.lng, currentDestLat, currentDestLng);
+                }
+            } catch (e) {
+                console.error('Refresh failed:', e);
+            } finally {
+                btn.classList.remove('loading');
+                btn.innerHTML = '<i class="fas fa-sync-alt"></i> Refresh';
+            }
+        }
+
+        async function fetchMetrics(slat, slng, dlat, dlng) {
+            const url = `https://router.project-osrm.org/route/v1/driving/${slng},${slat};${dlng},${dlat}?overview=false`;
+            try {
+                const res = await fetch(url);
+                const result = await res.json();
+                if (result.routes && result.routes[0]) {
+                    const route = result.routes[0];
+                    const dist = (route.distance / 1000).toFixed(1);
+                    const dur = Math.round(route.duration / 60);
+                    
+                    document.getElementById('dist-val').innerText = dist + " km";
+                    
+                    const arrival = new Date(Date.now() + route.duration * 1000);
+                    document.getElementById('eta-val').innerText = arrival.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                }
+            } catch (e) {}
+        }
+
+        window.onload = () => {
+            initMap();
+            loadFirestoreData();
+        };
+    </script>
+</body>
+</html>

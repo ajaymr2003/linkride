@@ -4,14 +4,19 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.CAMERA" />
+    
+    <!-- Location Permissions -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    
+    <!-- SOS and Communication Permissions -->
     <uses-permission android:name="android.permission.SEND_SMS" />
+    <uses-permission android:name="android.permission.RECEIVE_SMS" />
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
-    <!-- Required for background tracking if you want it to work while screen is off -->
+    
+    <!-- Notification and Service Permissions -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
 
     <application
@@ -19,7 +24,7 @@
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
 
-        <!-- 2. FCM Notification Channel Metadata (Crucial for popups) -->
+        <!-- 2. FCM Notification Channel Metadata -->
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_channel_id"
             android:value="high_importance_channel" />
@@ -46,6 +51,15 @@
             </intent-filter>
         </activity>
 
+        <!-- ADD THIS: Broadcast Receiver for the Telephony Plugin (Helps with Android 14 compatibility) -->
+        <receiver android:name="com.shounakmulay.telephony.sms.IncomingSmsReceiver"
+            android:permission="android.permission.BROADCAST_SMS"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.provider.Telephony.SMS_RECEIVED" />
+            </intent-filter>
+        </receiver>
+
         <!-- UCROP ACTIVITY -->
         <activity
             android:name="com.yalantis.ucrop.UCropActivity"
@@ -62,7 +76,14 @@
             android:value="2" />
     </application>
 
+    <!-- 3. QUERIES (Required for url_launcher to open SMS app) -->
     <queries>
+        <!-- For Opening the SMS App -->
+        <intent>
+            <action android:name="android.intent.action.SENDTO" />
+            <data android:scheme="sms" />
+        </intent>
+        <!-- Existing Text Processing -->
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>

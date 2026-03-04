@@ -8,6 +8,7 @@ import '../screens/ride/driver/no_passenger_nav_screen.dart';
 // Passenger Screens
 import '../screens/ride/passenger/passenger_live_tracking.dart';
 import '../screens/ride/passenger/passenger_moving_screen.dart';
+import '../screens/ride/passenger/passenger_payment_page.dart';
 
 class TodayRideBanner extends StatelessWidget {
   final String uid;
@@ -28,11 +29,35 @@ class TodayRideBanner extends StatelessWidget {
       builder: (context, snapshot) {
         if (!snapshot.hasData || snapshot.data!.docs.isEmpty) return const SizedBox.shrink();
 
-        // 1. Identify the ride the user is part of (Driver or Passenger)
+        // --- ENHANCED FILTERING LOGIC ---
         var myRideDoc = snapshot.data!.docs.where((doc) {
           var data = doc.data() as Map<String, dynamic>;
+          bool isDriver = data['driver_uid'] == uid;
           List passengers = data['passengers'] ?? [];
-          return data['driver_uid'] == uid || passengers.contains(uid);
+          bool isPassenger = passengers.contains(uid);
+          Map<String, dynamic> routes = data['passenger_routes'] ?? {};
+
+          if (isPassenger) {
+            // PASSENGER CHECK: Hide if my specific ride_status is 'completed'
+            var myRoute = routes[uid] ?? {};
+            return myRoute['ride_status'] != 'completed';
+          } 
+          
+          if (isDriver) {
+            // DRIVER CHECK: Hide only if ALL passengers have completed the ride
+            if (passengers.isEmpty) return true; // Show if no one joined yet
+            
+            bool anyActivePassenger = false;
+            for (var pId in passengers) {
+              if (routes[pId] != null && routes[pId]['ride_status'] != 'completed') {
+                anyActivePassenger = true;
+                break;
+              }
+            }
+            return anyActivePassenger;
+          }
+
+          return false;
         }).toList();
 
         if (myRideDoc.isEmpty) return const SizedBox.shrink();
@@ -40,25 +65,20 @@ class TodayRideBanner extends StatelessWidget {
         var rideData = myRideDoc.first.data() as Map<String, dynamic>;
         var rideId = myRideDoc.first.id;
         bool isDriver = rideData['driver_uid'] == uid;
-
-        // --- DATABASE CHECK: Is Live Navigation Started? ---
         bool liveStarted = rideData['live_navigation_pressed'] == true;
 
         return GestureDetector(
           onTap: () {
             if (isDriver) {
               if (liveStarted) {
-                // TRUE: Skip Summary, run live navigation logic
                 _navigateDriverLive(context, rideId, rideData);
               } else {
-                // FALSE: Go to Summary Page
                 Navigator.push(
                   context, 
                   MaterialPageRoute(builder: (_) => RideSummaryPage(rideId: rideId, rideData: rideData))
                 );
               }
             } else {
-              // PASSENGER LOGIC
               _navigatePassengerLive(context, rideId, rideData);
             }
           },
@@ -98,20 +118,23 @@ class TodayRideBanner extends StatelessWidget {
     );
   }
 
-  // ===================== INTERNAL FUNCTIONS =====================
+  // ===================== NAVIGATION HELPERS =====================
 
   void _navigateDriverLive(BuildContext context, String rideId, Map<String, dynamic> rideData) {
     List passengers = rideData['passengers'] ?? [];
+    Map<String, dynamic> routes = rideData['passenger_routes'] ?? {};
 
-    if (passengers.isEmpty) {
+    // Only consider passengers not marked as 'completed'
+    List activePassengers = passengers.where((pId) => routes[pId]?['ride_status'] != 'completed').toList();
+
+    if (activePassengers.isEmpty) {
       Navigator.push(context, MaterialPageRoute(builder: (_) => NoPassengerNavScreen(rideId: rideId, rideData: rideData)));
       return;
     }
 
-    Map<String, dynamic> routes = rideData['passenger_routes'] ?? {};
     bool anyPendingPickup = false;
-    for (var pId in passengers) {
-      if (routes[pId] == null || routes[pId]['ride_status'] != 'security_completed') {
+    for (var pId in activePassengers) {
+      if (routes[pId]['ride_status'] != 'security_completed') {
         anyPendingPickup = true;
         break;
       }
@@ -126,9 +149,14 @@ class TodayRideBanner extends StatelessWidget {
 
   void _navigatePassengerLive(BuildContext context, String rideId, Map<String, dynamic> rideData) {
     Map<String, dynamic> routes = rideData['passenger_routes'] ?? {};
-    String myStatus = routes[uid] != null ? (routes[uid]['ride_status'] ?? 'approved') : 'approved';
+    var myRouteData = routes[uid] ?? {};
 
-    if (myStatus == 'security_completed') {
+    if (myRouteData['passenger_destinatin_reached_clicked'] == true) {
+      Navigator.push(context, MaterialPageRoute(builder: (_) => PassengerPaymentPage(rideId: rideId, rideData: rideData)));
+      return;
+    }
+
+    if (myRouteData['ride_status'] == 'security_completed') {
       Navigator.push(context, MaterialPageRoute(builder: (_) => PassengerMovingScreen(rideId: rideId, rideData: rideData)));
     } else {
       Navigator.push(context, MaterialPageRoute(builder: (_) => PassengerLiveTracking(rideData: rideData, rideId: rideId)));

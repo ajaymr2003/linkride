@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'driver_approval_screen.dart';
 import 'user_management_screen.dart';
-import 'active_rides_page.dart'; // 1. ADD THIS IMPORT
+import 'main_active.dart'; // 1. Updated Import
 
 class AdminHomePage extends StatelessWidget {
   const AdminHomePage({super.key});
@@ -93,11 +93,11 @@ class AdminHomePage extends StatelessWidget {
             const Text("Operations", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 15),
             
-            // --- CONNECTED: ACTIVE RIDES BUTTON ---
+            // --- UPDATED: ACTIVE RIDES BUTTON ---
             InkWell(
               onTap: () {
-                 // 2. UPDATED NAVIGATION
-                 Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminActiveRidesPage()));
+                 // Navigation now points to the new MainActivePage (the one with tabs)
+                 Navigator.push(context, MaterialPageRoute(builder: (_) => const MainActivePage()));
               },
               child: Container(
                 width: double.infinity,
@@ -127,8 +127,8 @@ class AdminHomePage extends StatelessWidget {
                     const Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text("Active Rides", style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
-                        Text("Monitor ongoing trips", style: TextStyle(color: Colors.white70, fontSize: 14)),
+                        Text("Ride Monitor", style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
+                        Text("Active & Past Rides", style: TextStyle(color: Colors.white70, fontSize: 14)),
                       ],
                     ),
                     const Spacer(),

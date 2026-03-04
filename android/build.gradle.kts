@@ -12,7 +12,19 @@ subprojects {
     val newSubprojectBuildDir: Directory = newBuildDir.dir(project.name)
     project.layout.buildDirectory.value(newSubprojectBuildDir)
 }
+
 subprojects {
+    // FIX FOR TELEPHONY NAMESPACE ERROR
+    // This runs as the plugins are added, before evaluation is forced
+    project.plugins.whenPluginAdded {
+        if (this.javaClass.name.contains("com.android.build.gradle.BasePlugin")) {
+            val android = project.extensions.getByName("android") as com.android.build.gradle.BaseExtension
+            if (android.namespace == null) {
+                android.namespace = "com.example.${project.name.replace("-", "_")}"
+            }
+        }
+    }
+
     project.evaluationDependsOn(":app")
 }
 

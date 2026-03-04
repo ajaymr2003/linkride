@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'user_detail_view.dart'; // Ensure this import exists
+import 'user_detail_view.dart';
 
 class UserManagementScreen extends StatefulWidget {
   const UserManagementScreen({super.key});
@@ -11,21 +11,50 @@ class UserManagementScreen extends StatefulWidget {
 
 class _UserManagementScreenState extends State<UserManagementScreen> {
   final Color primaryGreen = const Color(0xFF11A860);
-  
-  // Filter State
-  String _selectedFilter = 'All'; // Options: 'All', 'Drivers', 'Passengers'
+  String _selectedFilter = 'All'; 
 
-  // Helper to build the query based on filter
   Query _buildQuery() {
     Query query = FirebaseFirestore.instance.collection('users');
-    
     if (_selectedFilter == 'Drivers') {
       return query.where('driver_status', isEqualTo: 'approved');
     } else if (_selectedFilter == 'Passengers') {
-      // Using notEqualTo to find users who aren't approved drivers
       return query.where('driver_status', isNotEqualTo: 'approved'); 
     }
     return query;
+  }
+
+  // --- DELETE LOGIC ---
+  Future<void> _deleteUser(BuildContext context, String uid, String name) async {
+    bool confirm = await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Delete User?"),
+        content: Text("Are you sure you want to delete $name? This action cannot be undone and will remove their profile data."),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Cancel")),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text("Delete", style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    ) ?? false;
+
+    if (confirm) {
+      try {
+        await FirebaseFirestore.instance.collection('users').doc(uid).delete();
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text("$name deleted successfully"), backgroundColor: Colors.red),
+          );
+        }
+      } catch (e) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Error deleting user")));
+        }
+      }
+    }
   }
 
   @override
@@ -36,12 +65,9 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
         backgroundColor: primaryGreen,
         foregroundColor: Colors.white,
         actions: [
-          // --- FILTER BUTTON ---
           PopupMenuButton<String>(
             icon: const Icon(Icons.filter_list),
-            onSelected: (value) {
-              setState(() => _selectedFilter = value);
-            },
+            onSelected: (value) => setState(() => _selectedFilter = value),
             itemBuilder: (context) => [
               const PopupMenuItem(value: "All", child: Text("All Users")),
               const PopupMenuItem(value: "Drivers", child: Text("Drivers Only")),
@@ -58,7 +84,7 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
             return const Center(child: CircularProgressIndicator());
           }
           if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-            return const Center(child: Text("No users found matching filter."));
+            return const Center(child: Text("No users found."));
           }
 
           return ListView.builder(
@@ -68,66 +94,48 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
               var user = snapshot.data!.docs[index];
               var data = user.data() as Map<String, dynamic>;
               String uid = user.id;
+              String name = data['name'] ?? 'No Name';
               bool isDriver = data['driver_status'] == 'approved';
 
               return Card(
                 elevation: 2,
                 margin: const EdgeInsets.only(bottom: 12),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(12),
-                  // --- NAVIGATION TO DETAIL VIEW ---
+                child: ListTile(
+                  contentPadding: const EdgeInsets.all(12),
                   onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => UserDetailView(uid: uid),
-                      ),
-                    );
+                    Navigator.push(context, MaterialPageRoute(builder: (_) => UserDetailView(uid: uid)));
                   },
-                  child: Padding(
-                    padding: const EdgeInsets.all(12.0),
-                    child: Row(
-                      children: [
-                        // Avatar
-                        CircleAvatar(
-                          radius: 25,
-                          backgroundColor: isDriver ? Colors.green.shade100 : Colors.blue.shade100,
-                          backgroundImage: data['profile_pic'] != null ? NetworkImage(data['profile_pic']) : null,
-                          child: data['profile_pic'] == null 
-                            ? Icon(isDriver ? Icons.drive_eta : Icons.person, color: isDriver ? Colors.green : Colors.blue) 
-                            : null,
+                  leading: CircleAvatar(
+                    radius: 25,
+                    backgroundColor: isDriver ? Colors.green.shade100 : Colors.blue.shade100,
+                    backgroundImage: data['profile_pic'] != null ? NetworkImage(data['profile_pic']) : null,
+                    child: data['profile_pic'] == null 
+                        ? Icon(isDriver ? Icons.drive_eta : Icons.person, color: isDriver ? Colors.green : Colors.blue) 
+                        : null,
+                  ),
+                  title: Text(name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(data['email'] ?? 'No Email', style: const TextStyle(fontSize: 12)),
+                      const SizedBox(height: 5),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: isDriver ? Colors.green.shade50 : Colors.blue.shade50,
+                          borderRadius: BorderRadius.circular(4)
                         ),
-                        const SizedBox(width: 15),
-                        
-                        // Info
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                data['name'] ?? 'No Name',
-                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                              ),
-                              Text(
-                                data['email'] ?? 'No Email',
-                                style: TextStyle(color: Colors.grey[600], fontSize: 13),
-                              ),
-                              if (isDriver)
-                                Container(
-                                  margin: const EdgeInsets.only(top: 5),
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                  decoration: BoxDecoration(color: Colors.green.shade50, borderRadius: BorderRadius.circular(4)),
-                                  child: const Text("DRIVER", style: TextStyle(fontSize: 10, color: Colors.green, fontWeight: FontWeight.bold)),
-                                )
-                            ],
-                          ),
+                        child: Text(
+                          isDriver ? "DRIVER" : "PASSENGER", 
+                          style: TextStyle(fontSize: 9, color: isDriver ? Colors.green : Colors.blue, fontWeight: FontWeight.bold)
                         ),
-
-                        // Navigation Arrow (Delete button removed)
-                        const Icon(Icons.chevron_right, color: Colors.grey),
-                      ],
-                    ),
+                      )
+                    ],
+                  ),
+                  trailing: IconButton(
+                    icon: const Icon(Icons.delete_outline, color: Colors.red),
+                    onPressed: () => _deleteUser(context, uid, name),
                   ),
                 ),
               );
