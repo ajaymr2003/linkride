@@ -4,7 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
 import 'package:image_picker/image_picker.dart'; 
-import '../../../../services/cloudinary_service.dart'; 
+import '../../../../../../services/cloudinary_service.dart'; 
 
 class EditPersonalDetailsPage extends StatefulWidget {
   final Map<String, dynamic> userData;

@@ -109,16 +109,13 @@ class _RideMovingScreenState extends State<RideMovingScreen> {
     } catch (e) {}
   }
 
-  // --- NEW: LOGIC TO UPDATE DB AND NAVIGATE ---
   Future<void> _handleReachedDestination(String pUid, String pName, dynamic pPrice) async {
     try {
-      // 1. Update Firestore: driver_clicked_destination_reached = true
       await FirebaseFirestore.instance.collection('rides').doc(widget.rideId).update({
         'passenger_routes.$pUid.driver_clicked_destination_reached': true,
       });
 
       if (mounted) {
-        // 2. Navigate to Payment Page
         Navigator.push(
           context, 
           MaterialPageRoute(
@@ -126,16 +123,13 @@ class _RideMovingScreenState extends State<RideMovingScreen> {
               rideId: widget.rideId, 
               passengerUid: pUid, 
               passengerName: pName, 
-              price: pPrice,
+              price: pPrice, // Passing the specific fare
             )
           )
         );
       }
     } catch (e) {
       debugPrint("Update Error: $e");
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Error updating status. Please try again."))
-      );
     }
   }
 
@@ -162,6 +156,7 @@ class _RideMovingScreenState extends State<RideMovingScreen> {
           String? activeUid;
           String passengerName = "Passenger";
           String dropoffName = "Destination";
+          dynamic activePassengerFare = 0;
           
           for (var uid in routes.keys) {
             if (routes[uid]['ride_status'] == 'security_completed') {
@@ -169,6 +164,9 @@ class _RideMovingScreenState extends State<RideMovingScreen> {
               passengerName = routes[uid]['passenger_name'] ?? "Passenger";
               dropoffName = routes[uid]['dropoff']['name'] ?? "Destination";
               
+              // --- UPDATED: Get specific fare stored for this user ---
+              activePassengerFare = routes[uid]['fare'] ?? data['price_per_seat'] ?? 0;
+
               LatLng newDropoff = LatLng(routes[uid]['dropoff']['lat'], routes[uid]['dropoff']['lng']);
               if (_passengerDropoff == null || _passengerDropoff != newDropoff) {
                 _passengerDropoff = newDropoff;
@@ -178,7 +176,7 @@ class _RideMovingScreenState extends State<RideMovingScreen> {
             }
           }
 
-          bool isNearDropoff = _rawDistanceMeters < 400; // Updated to 400m for better UX
+          bool isNearDropoff = _rawDistanceMeters < 400; 
 
           return Stack(
             children: [
@@ -256,7 +254,7 @@ class _RideMovingScreenState extends State<RideMovingScreen> {
                           onPressed: activeUid == null ? null : () => _handleReachedDestination(
                             activeUid!, 
                             passengerName, 
-                            data['price_per_seat'] ?? 0
+                            activePassengerFare // <--- PASSING STORED FARE
                           ),
                           child: const Text(
                             "DESTINATION REACHED", 

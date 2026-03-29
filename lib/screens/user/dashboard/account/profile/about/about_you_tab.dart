@@ -5,6 +5,8 @@ import 'edit_personal_details_page.dart';
 import 'mini_bio_page.dart';
 import 'travel_preferences_page.dart';
 import 'vehicle/add_vehicle_page.dart';
+import 'edit_guardian_page.dart'; // New Import
+import 'edit_pin_page.dart';      // New Import
 
 class AboutYouTab extends StatelessWidget {
   final Map<String, dynamic> userData;
@@ -21,6 +23,10 @@ class AboutYouTab extends StatelessWidget {
     bool isIdVerified = userData['driver_status'] == 'approved';
     String phone = userData['phone'] ?? "";
     bool isPhoneAdded = phone.isNotEmpty;
+
+    // Guardian & PIN Data
+    String gName = userData['guardian_name'] ?? "Not added";
+    String gPhone = userData['guardian_phone'] ?? "Not added";
 
     String emailText = user?.email ?? "No Email Linked";
     String phoneText = isPhoneAdded ? phone : "No Phone Linked";
@@ -55,11 +61,31 @@ class AboutYouTab extends StatelessWidget {
         ),
         const SizedBox(height: 25),
         
-        // --- EDIT PERSONAL DETAILS ---
         GestureDetector(
           onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => EditPersonalDetailsPage(userData: userData))),
           child: const Text("Edit personal details", style: TextStyle(color: primaryGreen, fontWeight: FontWeight.bold, fontSize: 16)),
         ),
+
+        const SizedBox(height: 30),
+
+        // --- SAFETY & SECURITY SECTION (NEW) ---
+        const Text("Safety & Security", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: darkGreen)),
+        const SizedBox(height: 10),
+        
+        // Guardian Details Tile
+        _buildActionTextButton(
+          label: "Guardian: $gName",
+          icon: Icons.security,
+          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => EditGuardianPage(currentName: userData['guardian_name'] ?? "", currentPhone: userData['guardian_phone'] ?? ""))),
+        ),
+        
+        // Security PIN Tile
+        _buildActionTextButton(
+          label: "Update Security PIN",
+          icon: Icons.lock_outline,
+          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const EditPinPage())),
+        ),
+
         const SizedBox(height: 30),
 
         // --- VERIFICATIONS ---
@@ -68,19 +94,18 @@ class AboutYouTab extends StatelessWidget {
         _buildVerifyTile(idText, isIdVerified),
         _buildVerifyTile(emailText, isEmailVerified),
         _buildVerifyTile(phoneText, isPhoneAdded),
+        
         const SizedBox(height: 30),
 
         // --- ABOUT YOU SECTION ---
         const Text("About you", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: darkGreen)),
         const SizedBox(height: 10),
         
-        // 1. Mini Bio Button
         _buildActionTextButton(
           label: (miniBio != null && miniBio.isNotEmpty) ? "Edit mini bio" : "Add a mini bio",
           onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => MiniBioPage(currentBio: miniBio))),
         ),
         
-        // 2. Travel Preferences Button
         _buildActionTextButton(
           label: "Edit travel preferences",
           onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => TravelPreferencesPage(currentPrefs: prefs))),
@@ -92,7 +117,6 @@ class AboutYouTab extends StatelessWidget {
         const Text("Vehicles", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: darkGreen)),
         const SizedBox(height: 10),
         
-        // List existing vehicles
         StreamBuilder<QuerySnapshot>(
           stream: FirebaseFirestore.instance.collection('users').doc(user!.uid).collection('vehicles').snapshots(),
           builder: (context, snapshot) {
@@ -109,11 +133,10 @@ class AboutYouTab extends StatelessWidget {
                 }).toList(),
               );
             }
-            return const SizedBox.shrink(); // Hide if no vehicles
+            return const SizedBox.shrink();
           },
         ),
 
-        // 3. Add Vehicle Button
         _buildActionTextButton(
           label: "Add vehicle",
           onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AddVehiclePage())),
@@ -125,7 +148,6 @@ class AboutYouTab extends StatelessWidget {
     );
   }
 
-  // Helper for status lines
   Widget _buildVerifyTile(String detailText, bool isVerified) {
     return ListTile(
       contentPadding: EdgeInsets.zero,
@@ -134,7 +156,6 @@ class AboutYouTab extends StatelessWidget {
     );
   }
 
-  // Helper for action buttons (blue text style usually, here customized)
   Widget _buildActionTextButton({required String label, required VoidCallback onTap, IconData? icon}) {
     return InkWell(
       onTap: onTap,
@@ -143,15 +164,13 @@ class AboutYouTab extends StatelessWidget {
         child: Row(
           children: [
             if (icon != null) ...[Icon(icon, color: const Color(0xFF11A860), size: 20), const SizedBox(width: 10)],
-            Text(
-              label,
-              style: const TextStyle(
-                color: Color(0xFF11A860), 
-                fontWeight: FontWeight.bold, 
-                fontSize: 16
+            Expanded(
+              child: Text(
+                label,
+                style: const TextStyle(color: Color(0xFF11A860), fontWeight: FontWeight.bold, fontSize: 16),
+                overflow: TextOverflow.ellipsis,
               ),
             ),
-            const Spacer(),
             const Icon(Icons.chevron_right, color: Colors.grey),
           ],
         ),

@@ -4,6 +4,7 @@ import '../driver_request/driver_approval_screen.dart';
 import 'user_management_screen.dart';
 import '../ride_details/main_active.dart';
 import 'admin_reports_page.dart'; 
+import 'admin_inbox_page.dart'; // <--- ADD THIS IMPORT
 
 class AdminHomePage extends StatelessWidget {
   const AdminHomePage({super.key});
@@ -27,30 +28,45 @@ class AdminHomePage extends StatelessWidget {
         foregroundColor: darkGreen,
         elevation: 0,
         actions: [
-          Stack(
-            alignment: Alignment.center,
-            children: [
-              IconButton(
-                icon: const Icon(Icons.notifications_none_rounded, size: 28),
-                onPressed: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text("No new system notifications")),
-                  );
-                },
-              ),
-              Positioned(
-                top: 15,
-                right: 12,
-                child: Container(
-                  width: 10,
-                  height: 10,
-                  decoration: const BoxDecoration(
-                    color: Colors.red,
-                    shape: BoxShape.circle,
+          // --- UPDATED NOTIFICATION ICON LOGIC ---
+          StreamBuilder<QuerySnapshot>(
+            stream: FirebaseFirestore.instance
+                .collection('admin_inbox')
+                .where('isRead', isEqualTo: false)
+                .snapshots(),
+            builder: (context, snapshot) {
+              bool hasUnread = snapshot.hasData && snapshot.data!.docs.isNotEmpty;
+
+              return Stack(
+                alignment: Alignment.center,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.notifications_none_rounded, size: 28),
+                    onPressed: () {
+                      // Navigate to Admin Inbox
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const AdminInboxPage()),
+                      );
+                    },
                   ),
-                ),
-              )
-            ],
+                  if (hasUnread)
+                    Positioned(
+                      top: 12,
+                      right: 12,
+                      child: Container(
+                        padding: const EdgeInsets.all(2),
+                        decoration: BoxDecoration(
+                          color: Colors.red,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 1.5),
+                        ),
+                        constraints: const BoxConstraints(minWidth: 10, minHeight: 10),
+                      ),
+                    )
+                ],
+              );
+            },
           ),
           const SizedBox(width: 15),
         ],
@@ -94,7 +110,6 @@ class AdminHomePage extends StatelessWidget {
             const Text("Operations", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 15),
             
-            // --- UPDATED SIDE-BY-SIDE BUTTONS ---
             Row(
               children: [
                 Expanded(
@@ -133,7 +148,8 @@ class AdminHomePage extends StatelessWidget {
     );
   }
 
-  // Helper for the Operations Cards (Monitor & Reports)
+  // --- HELPER WIDGETS ---
+
   Widget _buildOpCard(BuildContext context, {required String title, required String subtitle, required IconData icon, required Color color, required VoidCallback onTap}) {
     return InkWell(
       onTap: onTap,
@@ -175,10 +191,7 @@ class AdminHomePage extends StatelessWidget {
     return StreamBuilder<QuerySnapshot>(
       stream: query.snapshots(),
       builder: (context, snapshot) {
-        String count = "...";
-        if (snapshot.hasData) {
-          count = snapshot.data!.docs.length.toString();
-        }
+        String count = snapshot.hasData ? snapshot.data!.docs.length.toString() : "...";
 
         return InkWell(
           onTap: onTap,
@@ -188,9 +201,7 @@ class AdminHomePage extends StatelessWidget {
             decoration: BoxDecoration(
               color: Colors.white,
               borderRadius: BorderRadius.circular(20),
-              boxShadow: [
-                BoxShadow(color: Colors.grey.withOpacity(0.1), blurRadius: 10, offset: const Offset(0, 5)),
-              ],
+              boxShadow: [BoxShadow(color: Colors.grey.withOpacity(0.1), blurRadius: 10, offset: const Offset(0, 5))],
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -200,14 +211,10 @@ class AdminHomePage extends StatelessWidget {
                   children: [
                     Container(
                       padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: color.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
+                      decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
                       child: Icon(icon, color: color, size: 24),
                     ),
-                    if (snapshot.hasData)
-                      const Icon(Icons.arrow_outward, color: Colors.grey, size: 18),
+                    const Icon(Icons.arrow_outward, color: Colors.grey, size: 18),
                   ],
                 ),
                 const SizedBox(height: 15),

@@ -5,7 +5,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:http/http.dart' as http;
 import 'pay_by_cash_page.dart';
 import 'razorpay_payment_page.dart';
-import 'passenger_moving_screen.dart'; // IMPORTED
+import 'passenger_moving_screen.dart'; 
+import 'driver_review_page.dart'; // <--- IMPORTED
 
 class PassengerPaymentPage extends StatelessWidget {
   final String rideId;
@@ -13,7 +14,7 @@ class PassengerPaymentPage extends StatelessWidget {
 
   const PassengerPaymentPage({super.key, required this.rideId, required this.rideData});
 
-  // --- FETCH TRIP STATS ---
+  // --- FETCH TRIP STATS (Distance/Duration) ---
   Future<Map<String, String>> _fetchTripStats() async {
     final source = rideData['source'];
     final dest = rideData['destination'];
@@ -39,9 +40,7 @@ class PassengerPaymentPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final String uid = FirebaseAuth.instance.currentUser!.uid;
-    final price = rideData['price_per_seat'] ?? 0;
     const primaryGreen = Color(0xFF11A860);
-    const darkGreen = Color(0xFF2B5145);
 
     return StreamBuilder<DocumentSnapshot>(
       stream: FirebaseFirestore.instance.collection('rides').doc(rideId).snapshots(),
@@ -50,9 +49,18 @@ class PassengerPaymentPage extends StatelessWidget {
 
         var data = snapshot.data!.data() as Map<String, dynamic>;
         var myRoute = data['passenger_routes'][uid];
+        
         String status = myRoute['payment_status'] ?? 'unpaid';
+        final dynamic price = myRoute['fare'] ?? rideData['price_per_seat'] ?? 0;
 
-        if (status == 'paid') return _buildSuccessUI(context);
+        // --- UPDATED LOGIC: REDIRECT TO REVIEW PAGE IMMEDIATELY ---
+        if (status == 'paid') {
+          return DriverReviewPage(
+            driverUid: data['driver_uid'], 
+            driverName: data['driver_name'] ?? "Driver", 
+            rideId: rideId,
+          );
+        }
 
         return Scaffold(
           backgroundColor: const Color(0xFFF8F9FA),
@@ -61,11 +69,9 @@ class PassengerPaymentPage extends StatelessWidget {
             elevation: 0,
             backgroundColor: Colors.white,
             foregroundColor: Colors.black,
-            // --- UPDATED BACK BUTTON LOGIC ---
             leading: IconButton(
               icon: const Icon(Icons.arrow_back_ios_new, size: 20),
               onPressed: () {
-                // Instead of pop, we explicitly return to the Moving Screen (Map)
                 Navigator.pushReplacement(
                   context, 
                   MaterialPageRoute(builder: (_) => PassengerMovingScreen(rideId: rideId, rideData: rideData))
@@ -151,7 +157,7 @@ class PassengerPaymentPage extends StatelessWidget {
     );
   }
 
-  // UI Widgets Helper methods remain the same...
+  // --- UI HELPER WIDGETS ---
   Widget _summaryRow(IconData icon, String text, Color color) {
     return Row(children: [Icon(icon, color: color, size: 20), const SizedBox(width: 15), Expanded(child: Text(text, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600), overflow: TextOverflow.ellipsis))]);
   }
@@ -163,35 +169,5 @@ class PassengerPaymentPage extends StatelessWidget {
   }
   Widget _paymentTile(BuildContext context, {required String title, required String sub, required IconData icon, required Color color, required VoidCallback onTap}) {
     return InkWell(onTap: onTap, borderRadius: BorderRadius.circular(20), child: Container(padding: const EdgeInsets.all(20), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), border: Border.all(color: Colors.grey.shade100)), child: Row(children: [CircleAvatar(backgroundColor: color.withOpacity(0.1), child: Icon(icon, color: color)), const SizedBox(width: 15), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)), Text(sub, style: const TextStyle(color: Colors.grey, fontSize: 12))])), const Icon(Icons.arrow_forward_ios, size: 14, color: Colors.grey)])));
-  }
-
-  Widget _buildSuccessUI(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.white,
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(padding: const EdgeInsets.all(25), decoration: const BoxDecoration(color: Color(0xFFE8F5E9), shape: BoxShape.circle), child: const Icon(Icons.check_circle, size: 80, color: Color(0xFF11A860))),
-            const SizedBox(height: 25),
-            const Text("Payment Confirmed!", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            const Text("Your trip has been successfully completed.", style: TextStyle(color: Colors.grey)),
-            const SizedBox(height: 60),
-            SizedBox(
-              width: 220,
-              height: 55,
-              child: ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2B5145), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15))),
-                onPressed: () {
-                  Navigator.of(context).popUntil((route) => route.isFirst);
-                }, 
-                child: const Text("BACK TO HOME", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))
-              ),
-            )
-          ],
-        ),
-      ),
-    );
   }
 }

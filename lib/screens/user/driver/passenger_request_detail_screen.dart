@@ -99,6 +99,11 @@ class _PassengerRequestDetailScreenState
   Widget build(BuildContext context) {
     String status = widget.bookingData['status'] ?? 'pending';
 
+    // --- FIX: NULL FARE LOGIC ---
+    // Checks 'price', then 'suggested_price', defaults to 0
+    final dynamic rawFare = widget.bookingData['price'] ?? widget.bookingData['suggested_price'] ?? 0;
+    final String fareDisplay = rawFare.toString();
+
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
@@ -123,8 +128,9 @@ class _PassengerRequestDetailScreenState
                       // 1. Profile Section
                       CircleAvatar(
                         radius: 50,
+                        backgroundColor: Colors.grey[200],
                         backgroundImage: user['profile_pic'] != null ? NetworkImage(user['profile_pic']) : null,
-                        child: user['profile_pic'] == null ? const Icon(Icons.person, size: 50) : null,
+                        child: user['profile_pic'] == null ? const Icon(Icons.person, size: 50, color: Colors.grey) : null,
                       ),
                       const SizedBox(height: 15),
                       Text(user['name'] ?? "User", style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
@@ -132,7 +138,7 @@ class _PassengerRequestDetailScreenState
                       
                       const SizedBox(height: 30),
 
-                      // 2. Context Card (Which of driver's rides is this for?)
+                      // 2. Context Card
                       _buildContextCard(),
                       
                       const SizedBox(height: 25),
@@ -149,12 +155,19 @@ class _PassengerRequestDetailScreenState
                       
                       const Padding(padding: EdgeInsets.symmetric(vertical: 25), child: Divider()),
                       
-                      // 4. Price Row
+                      // 4. Price Row (UPDATED TO USE fareDisplay)
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          const Text("Trip Fare", style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
-                          Text("₹${widget.bookingData['price']}", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: primaryGreen)),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text("Trip Fare", style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
+                              if (widget.bookingData['distance_km'] != null)
+                                Text("${widget.bookingData['distance_km']} km distance", style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                            ],
+                          ),
+                          Text("₹$fareDisplay", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: primaryGreen)),
                         ],
                       ),
                     ],
@@ -237,7 +250,7 @@ class _PassengerRequestDetailScreenState
                   child: OutlinedButton(
                     onPressed: _isLoading ? null : _cancelBooking, 
                     style: OutlinedButton.styleFrom(foregroundColor: Colors.red, side: const BorderSide(color: Colors.red), padding: const EdgeInsets.symmetric(vertical: 15)), 
-                    child: const Text("CANCEL BOOKING")
+                    child: const Text("CANCEL")
                   )
                 ),
                 const SizedBox(width: 15),

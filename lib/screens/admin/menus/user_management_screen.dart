@@ -13,23 +13,13 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
   final Color primaryGreen = const Color(0xFF11A860);
   String _selectedFilter = 'All'; 
 
-  Query _buildQuery() {
-    Query query = FirebaseFirestore.instance.collection('users');
-    if (_selectedFilter == 'Drivers') {
-      return query.where('driver_status', isEqualTo: 'approved');
-    } else if (_selectedFilter == 'Passengers') {
-      return query.where('driver_status', isNotEqualTo: 'approved'); 
-    }
-    return query;
-  }
-
   // --- DELETE LOGIC ---
   Future<void> _deleteUser(BuildContext context, String uid, String name) async {
     bool confirm = await showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text("Delete User?"),
-        content: Text("Are you sure you want to delete $name? This action cannot be undone and will remove their profile data."),
+        content: Text("Are you sure you want to delete $name? This action cannot be undone."),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Cancel")),
           ElevatedButton(
@@ -44,13 +34,13 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
     if (confirm) {
       try {
         await FirebaseFirestore.instance.collection('users').doc(uid).delete();
-        if (context.mounted) {
+        if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text("$name deleted successfully"), backgroundColor: Colors.red),
           );
         }
       } catch (e) {
-        if (context.mounted) {
+        if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Error deleting user")));
         }
       }
@@ -78,20 +68,36 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
         ],
       ),
       body: StreamBuilder<QuerySnapshot>(
-        stream: _buildQuery().snapshots(),
+        // Fetch all users and filter locally for better reliability
+        stream: FirebaseFirestore.instance.collection('users').snapshots(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
           if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-            return const Center(child: Text("No users found."));
+            return const Center(child: Text("No users found in database."));
+          }
+
+          // --- LOCAL FILTERING LOGIC ---
+          var allUsers = snapshot.data!.docs;
+          var filteredUsers = allUsers.where((doc) {
+            var data = doc.data() as Map<String, dynamic>;
+            bool isDriver = data['driver_status'] == 'approved';
+
+            if (_selectedFilter == 'Drivers') return isDriver;
+            if (_selectedFilter == 'Passengers') return !isDriver;
+            return true; // 'All'
+          }).toList();
+
+          if (filteredUsers.isEmpty) {
+            return Center(child: Text("No users found for '$_selectedFilter'"));
           }
 
           return ListView.builder(
-            itemCount: snapshot.data!.docs.length,
+            itemCount: filteredUsers.length,
             padding: const EdgeInsets.all(12),
             itemBuilder: (context, index) {
-              var user = snapshot.data!.docs[index];
+              var user = filteredUsers[index];
               var data = user.data() as Map<String, dynamic>;
               String uid = user.id;
               String name = data['name'] ?? 'No Name';

@@ -3,7 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
 import '../home/edit_ride_page.dart';
-import 'ride_details_view.dart'; // Import the details page
+import 'ride_details_view.dart';
 
 class OfferedRidesPage extends StatefulWidget {
   const OfferedRidesPage({super.key});
@@ -19,7 +19,19 @@ class _OfferedRidesPageState extends State<OfferedRidesPage> {
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
-    final now = Timestamp.now();
+
+    // --- LOGIC: Primary source of truth is now the 'status' field ---
+    // Upcoming: Rides that are still 'active'
+    // Completed: Rides marked 'completed' or 'cancelled'
+    Query rideQuery = FirebaseFirestore.instance
+        .collection('rides')
+        .where('driver_uid', isEqualTo: user?.uid);
+
+    if (_showUpcoming) {
+      rideQuery = rideQuery.where('status', isEqualTo: 'active');
+    } else {
+      rideQuery = rideQuery.where('status', whereIn: ['completed', 'cancelled']);
+    }
 
     return Column(
       children: [
@@ -34,7 +46,7 @@ class _OfferedRidesPageState extends State<OfferedRidesPage> {
           child: Row(
             children: [
               _buildFilterButton("Upcoming", _showUpcoming, () => setState(() => _showUpcoming = true)),
-              _buildFilterButton("Completed", !_showUpcoming, () => setState(() => _showUpcoming = false)),
+              _buildFilterButton("History", !_showUpcoming, () => setState(() => _showUpcoming = false)),
             ],
           ),
         ),
@@ -42,19 +54,7 @@ class _OfferedRidesPageState extends State<OfferedRidesPage> {
         // --- 2. RIDES LIST ---
         Expanded(
           child: StreamBuilder<QuerySnapshot>(
-            stream: _showUpcoming 
-              ? FirebaseFirestore.instance
-                  .collection('rides')
-                  .where('driver_uid', isEqualTo: user?.uid)
-                  .where('departure_time', isGreaterThanOrEqualTo: now)
-                  .orderBy('departure_time', descending: false)
-                  .snapshots()
-              : FirebaseFirestore.instance
-                  .collection('rides')
-                  .where('driver_uid', isEqualTo: user?.uid)
-                  .where('departure_time', isLessThan: now)
-                  .orderBy('departure_time', descending: true)
-                  .snapshots(),
+            stream: rideQuery.snapshots(),
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) {
                 return const Center(child: CircularProgressIndicator());
@@ -63,18 +63,27 @@ class _OfferedRidesPageState extends State<OfferedRidesPage> {
                 return _buildEmptyState(_showUpcoming);
               }
 
+              // Sort locally to avoid needing complex Firestore composite indexes
+              var docs = snapshot.data!.docs;
+              docs.sort((a, b) {
+                var d1 = (a.data() as Map<String, dynamic>)['departure_time'] as Timestamp;
+                var d2 = (b.data() as Map<String, dynamic>)['departure_time'] as Timestamp;
+                // Upcoming: earliest first. History: most recent first.
+                return _showUpcoming ? d1.compareTo(d2) : d2.compareTo(d1);
+              });
+
               return ListView.builder(
                 padding: const EdgeInsets.symmetric(horizontal: 15),
-                itemCount: snapshot.data!.docs.length,
+                itemCount: docs.length,
                 itemBuilder: (context, index) {
-                  var doc = snapshot.data!.docs[index];
+                  var doc = docs[index];
                   var data = doc.data() as Map<String, dynamic>;
                   DateTime dt = (data['departure_time'] as Timestamp).toDate();
                   List passengers = data['passengers'] ?? [];
+                  String status = data['status'] ?? 'active';
 
                   return InkWell(
                     onTap: () {
-                      // Navigate to details if the trip is completed
                       if (!_showUpcoming) {
                         Navigator.push(
                           context,
@@ -91,6 +100,9 @@ class _OfferedRidesPageState extends State<OfferedRidesPage> {
                         color: Colors.white,
                         borderRadius: BorderRadius.circular(15),
                         border: Border.all(color: Colors.grey.shade200),
+                        boxShadow: [
+                          BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 10)
+                        ],
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -106,7 +118,7 @@ class _OfferedRidesPageState extends State<OfferedRidesPage> {
                                   onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => EditRidePage(docId: doc.id, initialData: data))),
                                 )
                               else
-                                const Icon(Icons.check_circle, color: Colors.blue, size: 20),
+                                _statusBadge(status),
                             ],
                           ),
                           _locationRow(Icons.circle_outlined, data['source']['name'] ?? "Source", Colors.grey),
@@ -114,7 +126,6 @@ class _OfferedRidesPageState extends State<OfferedRidesPage> {
                           
                           const Divider(height: 25),
 
-                          // --- PASSENGER NAMES SECTION (Existing function) ---
                           if (passengers.isNotEmpty) ...[
                             const Text("Confirmed Passengers:", style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey)),
                             const SizedBox(height: 8),
@@ -126,7 +137,7 @@ class _OfferedRidesPageState extends State<OfferedRidesPage> {
                             children: [
                               const Icon(Icons.airline_seat_recline_normal, size: 16, color: Colors.grey),
                               const SizedBox(width: 5),
-                              Text(_showUpcoming ? "${data['available_seats']} seats left" : "Ride Completed", 
+                              Text(_showUpcoming ? "${data['available_seats']} seats left" : "Ride Ended", 
                                   style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
                               const Spacer(),
                               Text("₹${data['price_per_seat']}", style: TextStyle(color: primaryGreen, fontWeight: FontWeight.bold, fontSize: 16)),
@@ -145,7 +156,23 @@ class _OfferedRidesPageState extends State<OfferedRidesPage> {
     );
   }
 
-  // --- HELPER: FETCH AND BUILD PASSENGER NAMES (Existing function) ---
+  // --- UI HELPERS ---
+
+  Widget _statusBadge(String status) {
+    bool isCompleted = status == 'completed';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: isCompleted ? Colors.blue.withOpacity(0.1) : Colors.red.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        status.toUpperCase(),
+        style: TextStyle(color: isCompleted ? Colors.blue : Colors.red, fontSize: 10, fontWeight: FontWeight.bold),
+      ),
+    );
+  }
+
   Widget _buildPassengerNames(List uids) {
     return FutureBuilder<QuerySnapshot>(
       future: FirebaseFirestore.instance

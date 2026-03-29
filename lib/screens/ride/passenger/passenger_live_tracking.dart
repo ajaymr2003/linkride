@@ -11,6 +11,8 @@ import 'package:geolocator/geolocator.dart';
 import 'package:intl/intl.dart';
 import '../../../widgets/sos_button.dart';
 import 'passenger_security_display.dart';
+// --- ADDED IMPORT ---
+import '../../user/dashboard/inbox/chat_screen.dart';
 
 class PassengerLiveTracking extends StatefulWidget {
   final Map<String, dynamic> rideData;
@@ -496,11 +498,37 @@ class _PassengerLiveTrackingState extends State<PassengerLiveTracking> {
                       Row(
                         children: [
                           Expanded(
-                            child: OutlinedButton(
-                              onPressed: () {},
-                              child: const Text("MESSAGE"),
-                            ),
-                          ),
+  child: OutlinedButton(
+    onPressed: () {
+      // 1. Construct the chatId: rideId + underscore + passengerUid
+      // This matches the format used in BookingService: "${rId}_$pId"
+      final String chatId = "${widget.rideId}_$_myUid";
+
+      // 2. Get the Driver's name from the current stream data (ride)
+      final String driverName = ride['driver_name'] ?? "Driver";
+
+      // 3. Navigate to the Chat Screen
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ChatScreen(
+            chatId: chatId,
+            otherUserName: driverName,
+          ),
+        ),
+      );
+    },
+    style: OutlinedButton.styleFrom(
+      padding: const EdgeInsets.symmetric(vertical: 15),
+      side: BorderSide(color: Colors.grey.shade300),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    ),
+    child: const Text(
+      "MESSAGE",
+      style: TextStyle(fontWeight: FontWeight.bold, color: Colors.black87),
+    ),
+  ),
+),
                           const SizedBox(width: 10),
                           Expanded(
                             child: ElevatedButton(

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
-import 'ride_details_view.dart'; // Import the details page
+import 'ride_details_view.dart';
 
 class BookedTripsPage extends StatefulWidget {
   const BookedTripsPage({super.key});
@@ -18,30 +18,14 @@ class _BookedTripsPageState extends State<BookedTripsPage> {
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
-
-    // Logic: 
-    // Upcoming = pending or accepted
-    // Completed = completed or cancelled
-    Query bookingQuery = FirebaseFirestore.instance
-        .collection('bookings')
-        .where('passenger_uid', isEqualTo: user?.uid);
-
-    if (_showUpcoming) {
-      bookingQuery = bookingQuery.where('status', whereIn: ['pending', 'accepted']);
-    } else {
-      bookingQuery = bookingQuery.where('status', whereIn: ['completed', 'cancelled']);
-    }
+    if (user == null) return const SizedBox();
 
     return Column(
       children: [
-        // --- 1. FILTER TOGGLE BAR ---
         Container(
           margin: const EdgeInsets.all(15),
           padding: const EdgeInsets.all(5),
-          decoration: BoxDecoration(
-            color: Colors.grey[200],
-            borderRadius: BorderRadius.circular(12),
-          ),
+          decoration: BoxDecoration(color: Colors.grey[200], borderRadius: BorderRadius.circular(12)),
           child: Row(
             children: [
               _buildFilterButton("Upcoming", _showUpcoming, () => setState(() => _showUpcoming = true)),
@@ -50,10 +34,12 @@ class _BookedTripsPageState extends State<BookedTripsPage> {
           ),
         ),
 
-        // --- 2. TRIPS LIST ---
         Expanded(
           child: StreamBuilder<QuerySnapshot>(
-            stream: bookingQuery.snapshots(),
+            stream: FirebaseFirestore.instance
+                .collection('bookings')
+                .where('passenger_uid', isEqualTo: user.uid)
+                .snapshots(),
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) {
                 return const Center(child: CircularProgressIndicator());
@@ -62,85 +48,79 @@ class _BookedTripsPageState extends State<BookedTripsPage> {
                 return _buildEmptyState(_showUpcoming);
               }
 
-              // Sort: Upcoming (nearest first), Completed (most recent first)
-              var docs = snapshot.data!.docs;
-              docs.sort((a, b) {
-                var d1 = (a.data() as Map<String, dynamic>)['ride_date'] as Timestamp;
-                var d2 = (b.data() as Map<String, dynamic>)['ride_date'] as Timestamp;
-                return _showUpcoming ? d1.compareTo(d2) : d2.compareTo(d1);
-              });
+              return FutureBuilder<List<Map<String, dynamic>>>(
+                future: _processBookings(snapshot.data!.docs, user.uid),
+                builder: (context, processedSnapshot) {
+                  if (!processedSnapshot.hasData) return const SizedBox();
 
-              return ListView.builder(
-                padding: const EdgeInsets.symmetric(horizontal: 15),
-                itemCount: docs.length,
-                itemBuilder: (context, index) {
-                  var data = docs[index].data() as Map<String, dynamic>;
-                  DateTime dt = (data['ride_date'] as Timestamp).toDate();
-                  String status = data['status'] ?? "pending";
+                  var filteredList = processedSnapshot.data!.where((item) {
+                    String rideStatus = item['ride_doc_status'] ?? 'active';
+                    String bookingStatus = item['status'] ?? 'pending';
+                    if (_showUpcoming) {
+                      return (bookingStatus == 'pending' || bookingStatus == 'accepted' || bookingStatus == 'ongoing') 
+                             && rideStatus != 'completed';
+                    } else {
+                      return bookingStatus == 'completed' || bookingStatus == 'cancelled' || bookingStatus == 'rejected' || rideStatus == 'completed';
+                    }
+                  }).toList();
 
-                  return InkWell(
-                    onTap: () {
-                      // Navigate to details if the trip is completed
-                      if (status == 'completed') {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => RideDetailsView(data: data, isDriverView: false),
+                  if (filteredList.isEmpty) return _buildEmptyState(_showUpcoming);
+
+                  return ListView.builder(
+                    padding: const EdgeInsets.symmetric(horizontal: 15),
+                    itemCount: filteredList.length,
+                    itemBuilder: (context, index) {
+                      var data = filteredList[index];
+                      DateTime dt = (data['ride_date'] as Timestamp).toDate();
+                      
+                      // MASTER FARE LOGIC
+                      dynamic finalFare = data['ride_specific_fare'] ?? data['price'] ?? 0;
+                      String method = (data['ride_payment_method'] ?? "cash").toUpperCase();
+
+                      return InkWell(
+                        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => RideDetailsView(data: data, isDriverView: false))),
+                        child: Container(
+                          margin: const EdgeInsets.only(bottom: 12),
+                          padding: const EdgeInsets.all(15),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(15),
+                            border: Border.all(color: Colors.grey.shade200),
                           ),
-                        );
-                      }
-                    },
-                    child: Container(
-                      margin: const EdgeInsets.only(bottom: 12),
-                      padding: const EdgeInsets.all(15),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(15),
-                        border: Border.all(color: Colors.grey.shade200),
-                        boxShadow: [
-                          BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 10, offset: const Offset(0, 4))
-                        ],
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text(DateFormat('EEE, d MMM • h:mm a').format(dt), 
-                                  style: const TextStyle(fontSize: 12, color: Colors.grey, fontWeight: FontWeight.bold)),
-                              _statusBadge(status),
-                            ],
-                          ),
-                          const SizedBox(height: 15),
-                          _locationRow(Icons.circle_outlined, data['source']['name'], Colors.grey),
-                          const Padding(
-                            padding: EdgeInsets.only(left: 7),
-                            child: SizedBox(height: 10, child: VerticalDivider(width: 1)),
-                          ),
-                          _locationRow(Icons.location_on, data['destination']['name'], primaryGreen),
-                          const Divider(height: 30),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                 children: [
-                                  const Icon(Icons.person_outline, size: 16, color: Colors.grey),
-                                  const SizedBox(width: 5),
-                                  Text(data['driver_name'] ?? "Driver", style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+                                  Text(DateFormat('EEE, d MMM • h:mm a').format(dt), style: const TextStyle(fontSize: 12, color: Colors.grey, fontWeight: FontWeight.bold)),
+                                  _statusBadge(data['ride_doc_status'] == 'completed' ? 'completed' : data['status']),
                                 ],
                               ),
-                              Text("₹${data['price']}", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                              const SizedBox(height: 15),
+                              _locationRow(Icons.circle_outlined, data['source']['name'], Colors.grey),
+                              const Padding(padding: EdgeInsets.only(left: 7), child: SizedBox(height: 10, child: VerticalDivider(width: 1))),
+                              _locationRow(Icons.location_on, data['destination']['name'], primaryGreen),
+                              const Divider(height: 30),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(data['driver_name'] ?? "Driver", style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+                                      if(!_showUpcoming) Text("via $method", style: const TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold)),
+                                    ],
+                                  ),
+                                  Text(finalFare == 0 ? "FREE" : "₹$finalFare", 
+                                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: finalFare == 0 ? Colors.blue : Colors.black)),
+                                ],
+                              ),
                             ],
                           ),
-                          if(status == 'completed')
-                            const Padding(
-                              padding: EdgeInsets.only(top: 10),
-                              child: Center(child: Text("Tap to view details", style: TextStyle(color: Colors.blue, fontSize: 11))),
-                            ),
-                        ],
-                      ),
-                    ),
+                        ),
+                      );
+                    },
                   );
                 },
               );
@@ -151,53 +131,42 @@ class _BookedTripsPageState extends State<BookedTripsPage> {
     );
   }
 
-  Widget _buildFilterButton(String label, bool isActive, VoidCallback onTap) {
-    return Expanded(
-      child: GestureDetector(
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 10),
-          decoration: BoxDecoration(
-            color: isActive ? Colors.white : Colors.transparent,
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Center(child: Text(label, style: TextStyle(fontWeight: FontWeight.bold, color: isActive ? primaryGreen : Colors.grey))),
-        ),
-      ),
-    );
+  Future<List<Map<String, dynamic>>> _processBookings(List<QueryDocumentSnapshot> docs, String myUid) async {
+    List<Map<String, dynamic>> results = [];
+    for (var doc in docs) {
+      var bData = doc.data() as Map<String, dynamic>;
+      var rideSnap = await FirebaseFirestore.instance.collection('rides').doc(bData['ride_id']).get();
+      
+      if (rideSnap.exists) {
+        var rData = rideSnap.data()!;
+        bData['ride_doc_status'] = rData['status'] ?? 'active';
+        
+        // Extract specific passenger route data
+        var myRoute = rData['passenger_routes']?[myUid];
+        if (myRoute != null) {
+          bData['ride_specific_fare'] = myRoute['fare'];
+          bData['ride_payment_method'] = myRoute['payment_method'];
+          bData['ride_payment_status'] = myRoute['payment_status'];
+        }
+      }
+      results.add(bData);
+    }
+    return results;
   }
 
+  // --- UI Helpers (Keep existing _buildFilterButton, _statusBadge, _locationRow, _buildEmptyState) ---
+  Widget _buildFilterButton(String label, bool isActive, VoidCallback onTap) {
+    return Expanded(child: GestureDetector(onTap: onTap, child: Container(padding: const EdgeInsets.symmetric(vertical: 10), decoration: BoxDecoration(color: isActive ? Colors.white : Colors.transparent, borderRadius: BorderRadius.circular(8)), child: Center(child: Text(label, style: TextStyle(fontWeight: FontWeight.bold, color: isActive ? primaryGreen : Colors.grey))))));
+  }
   Widget _statusBadge(String status) {
     Color color = status == 'accepted' ? Colors.green : (status == 'completed' ? Colors.blue : Colors.red);
     if (status == 'pending') color = Colors.orange;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
-      child: Text(status.toUpperCase(), style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.bold)),
-    );
+    return Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4), decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(8)), child: Text(status.toUpperCase(), style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.bold)));
   }
-
   Widget _locationRow(IconData icon, String text, Color color) {
-    return Row(
-      children: [
-        Icon(icon, size: 16, color: color),
-        const SizedBox(width: 12),
-        Expanded(child: Text(text, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14), overflow: TextOverflow.ellipsis, maxLines: 1)),
-      ],
-    );
+    return Row(children: [Icon(icon, size: 16, color: color), const SizedBox(width: 12), Expanded(child: Text(text, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14), overflow: TextOverflow.ellipsis, maxLines: 1))]);
   }
-
   Widget _buildEmptyState(bool isUpcoming) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(isUpcoming ? Icons.calendar_today : Icons.history, size: 70, color: Colors.grey.shade300),
-          const SizedBox(height: 15),
-          Text(isUpcoming ? "No upcoming trips" : "No completed trips", style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.grey)),
-          Text(isUpcoming ? "Rides you book will appear here." : "Your past ride history is empty.", style: const TextStyle(color: Colors.grey)),
-        ],
-      ),
-    );
+    return Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(isUpcoming ? Icons.calendar_today : Icons.history, size: 70, color: Colors.grey.shade300), const SizedBox(height: 15), Text(isUpcoming ? "No upcoming trips" : "No completed trips", style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.grey))]));
   }
 }

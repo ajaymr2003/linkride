@@ -121,174 +121,156 @@
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
 
     <script>
-        const firebaseConfig = {
-            apiKey: "AIzaSyBvkBU65x76henG3m8AOrPlT6RCzS2qSt8",
-            databaseURL: "https://mainproject-c4112-default-rtdb.asia-southeast1.firebasedatabase.app",
-            projectId: "mainproject-c4112",
-            appId: "1:732530504308:web:fa39ae88bd505428f11721"
-        };
+    // 1. Firebase Configuration
+    const firebaseConfig = {
+        apiKey: "AIzaSyBvkBU65x76henG3m8AOrPlT6RCzS2qSt8",
+        databaseURL: "https://mainproject-c4112-default-rtdb.asia-southeast1.firebasedatabase.app",
+        projectId: "mainproject-c4112",
+        appId: "1:732530504308:web:fa39ae88bd505428f11721"
+    };
 
-        firebase.initializeApp(firebaseConfig);
-        const db = firebase.database();
-        const fs = firebase.firestore();
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+    const fs = firebase.firestore();
 
-        let map, marker, circle;
-        const urlParams = new URLSearchParams(window.location.search);
-        const uid = urlParams.get('uid');
-        let lastRefreshTime = null;
-        let currentDestLat = null;
-        let currentDestLng = null;
-        let refreshInterval = null;
+    let map, marker, circle;
+    const urlParams = new URLSearchParams(window.location.search);
+    const uid = urlParams.get('uid');
+    
+    let lastRefreshTime = null;
+    let currentDestLat = null;
+    let currentDestLng = null;
+    let refreshInterval = null;
 
-        function formatRelativeTime(timestamp) {
-            const now = Date.now();
-            const diff = now - timestamp;
-            const minutes = Math.floor(diff / 60000);
-            
-            if (minutes === 0) return "Just now";
-            if (minutes === 1) return "1 min ago";
-            if (minutes < 60) return minutes + " mins ago";
-            
-            const hours = Math.floor(minutes / 60);
-            if (hours === 1) return "1 hour ago";
-            return hours + " hours ago";
+    // 2. Initialize the Map
+    function initMap() {
+        map = L.map('map', { zoomControl: false }).setView([11.2588, 75.7804], 12);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { 
+            attribution: '© OpenStreetMap' 
+        }).addTo(map);
+    }
+
+    // 3. Load Trip Data from Firestore
+    async function loadFirestoreData() {
+        if (!uid) {
+            document.getElementById('loader').innerHTML = "⚠️ No Passenger ID provided in URL";
+            return;
         }
 
-        function updateLastRefreshTime() {
-            lastRefreshTime = Date.now();
-            document.getElementById('last-seen').innerText = formatRelativeTime(lastRefreshTime);
-        }
+        try {
+            // Updated to match your screenshot (status: "active")
+            const rideSnap = await fs.collection('rides')
+                .where('passengers', 'array-contains', uid)
+                .where('status', '==', 'active') 
+                .limit(1).get();
 
-        function updateRefreshDisplay() {
+            if (!rideSnap.empty) {
+                const ride = rideSnap.docs[0].data();
+                
+                // Set Passenger & Route UI
+                // Using passenger_routes map from your screenshot
+                if (ride.passenger_routes && ride.passenger_routes[uid]) {
+                    const myRoute = ride.passenger_routes[uid];
+                    document.getElementById('passenger-name').innerText = myRoute.passenger_name || "Passenger";
+                    document.getElementById('pickup-name').innerText = myRoute.pickup.name;
+                    document.getElementById('dropoff-name').innerText = myRoute.dropoff.name;
+                    
+                    currentDestLat = myRoute.dropoff.lat;
+                    currentDestLng = myRoute.dropoff.lng;
+                } else {
+                    document.getElementById('passenger-name').innerText = "LinkRide User";
+                    document.getElementById('pickup-name').innerText = ride.source.name;
+                    document.getElementById('dropoff-name').innerText = ride.destination.name;
+                    
+                    currentDestLat = ride.destination.lat;
+                    currentDestLng = ride.destination.lng;
+                }
+
+                // Fetch Driver Info
+                const driverSnap = await fs.collection('users').doc(ride.driver_uid).get();
+                if (driverSnap.exists) {
+                    document.getElementById('driver-name').innerText = driverSnap.data().name;
+                }
+
+                // Start Live Location Tracking
+                startLiveTracking();
+            } else {
+                document.getElementById('loader').innerHTML = "⚠️ No Active Trip Found<br><small style='color:gray'>Status might not be 'active'</small>";
+            }
+        } catch (e) {
+            console.error("Firestore Error:", e);
+            document.getElementById('loader').innerHTML = "⚠️ Connection Error";
+        }
+    }
+
+    // 4. Track Realtime Database Location
+    function startLiveTracking() {
+        const locRef = db.ref('user_locations/' + uid);
+
+        locRef.on('value', (snapshot) => {
+            const data = snapshot.val();
+            if (!data) return;
+
+            const pos = [data.lat, data.lng];
+            
+            updateLastRefreshTime();
+            document.getElementById('gmaps-link').href = `https://www.google.com/maps/search/?api=1&query=${data.lat},${data.lng}`;
+
+            if (marker) {
+                marker.setLatLng(pos);
+                circle.setLatLng(pos);
+            } else {
+                marker = L.marker(pos).addTo(map).bindPopup("Passenger is here").openPopup();
+                circle = L.circle(pos, { radius: 100, color: '#11A860' }).addTo(map);
+                map.setView(pos, 15);
+                document.getElementById('loader').style.display = 'none';
+            }
+
+            // Update distance/time left using OSRM
+            if (currentDestLat && currentDestLng) {
+                fetchMetrics(data.lat, data.lng, currentDestLat, currentDestLng);
+            }
+        });
+
+        // Relative time counter (e.g., "Just now", "1 min ago")
+        if (refreshInterval) clearInterval(refreshInterval);
+        refreshInterval = setInterval(() => {
             if (lastRefreshTime) {
                 document.getElementById('last-seen').innerText = formatRelativeTime(lastRefreshTime);
             }
-        }
+        }, 1000);
+    }
 
-        function initMap() {
-            map = L.map('map', { zoomControl: false }).setView([11.2588, 75.7804], 12);
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(map);
-        }
-
-        async function loadFirestoreData() {
-            if (!uid) return;
-
-            try {
-                // 1. Find the active ride for this passenger
-                const rideSnap = await fs.collection('rides')
-                    .where('passengers', 'array-contains', uid)
-                    .where('ride_status', '==', 'ongoing')
-                    .limit(1).get();
-
-                if (!rideSnap.empty) {
-                    const ride = rideSnap.docs[0].data();
-                    const myRoute = ride.passenger_routes[uid];
-
-                    document.getElementById('passenger-name').innerText = myRoute.passenger_name || "User";
-                    document.getElementById('pickup-name').innerText = myRoute.pickup.name;
-                    document.getElementById('dropoff-name').innerText = myRoute.dropoff.name;
-
-                    // 2. Fetch Driver Name
-                    const driverSnap = await fs.collection('users').doc(ride.driver_uid).get();
-                    if (driverSnap.exists) {
-                        document.getElementById('driver-name').innerText = driverSnap.data().name;
-                    }
-
-                    // Start Tracking
-                    startLiveTracking(myRoute.dropoff.lat, myRoute.dropoff.lng);
-                } else {
-                    document.getElementById('loader').innerHTML = "⚠️ No Active Trip Found";
-                }
-            } catch (e) {
-                console.error(e);
+    // 5. Utility Functions
+    async function fetchMetrics(slat, slng, dlat, dlng) {
+        const url = `https://router.project-osrm.org/route/v1/driving/${slng},${slat};${dlng},${dlat}?overview=false`;
+        try {
+            const res = await fetch(url);
+            const result = await res.json();
+            if (result.routes && result.routes[0]) {
+                const route = result.routes[0];
+                document.getElementById('dist-val').innerText = (route.distance / 1000).toFixed(1) + " km";
+                const arrival = new Date(Date.now() + route.duration * 1000);
+                document.getElementById('eta-val').innerText = arrival.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
             }
-        }
+        } catch (e) {}
+    }
 
-        function startLiveTracking(destLat, destLng) {
-            currentDestLat = destLat;
-            currentDestLng = destLng;
-            const locRef = db.ref('user_locations/' + uid);
+    function formatRelativeTime(timestamp) {
+        const diff = Math.floor((Date.now() - timestamp) / 60000);
+        if (diff === 0) return "Just now";
+        return diff + (diff === 1 ? " min ago" : " mins ago");
+    }
 
-            locRef.on('value', async (snapshot) => {
-                const data = snapshot.val();
-                if (!data) return;
+    function updateLastRefreshTime() {
+        lastRefreshTime = Date.now();
+        document.getElementById('last-seen').innerText = "Just now";
+    }
 
-                const pos = [data.lat, data.lng];
-                
-                // Update UI Coordinates & Last Seen
-                updateLastRefreshTime();
-                document.getElementById('gmaps-link').href = `https://www.google.com/maps/search/?api=1&query=${data.lat},${data.lng}`;
-
-                // Update Marker
-                if (marker) {
-                    marker.setLatLng(pos);
-                    circle.setLatLng(pos);
-                } else {
-                    marker = L.marker(pos).addTo(map).bindPopup("Live Position").openPopup();
-                    circle = L.circle(pos, { radius: 100, color: '#11A860' }).addTo(map);
-                    map.setView(pos, 15);
-                    document.getElementById('loader').style.display = 'none';
-                }
-
-                // FETCH OSRM FOR DISTANCE/ETA
-                fetchMetrics(data.lat, data.lng, destLat, destLng);
-            });
-
-            // Set up periodic refresh every 5 seconds
-            if (refreshInterval) clearInterval(refreshInterval);
-            refreshInterval = setInterval(() => {
-                updateRefreshDisplay();
-            }, 1000);
-
-            // Manual refresh handler
-            document.getElementById('refresh-btn').addEventListener('click', manualRefresh);
-        }
-
-        async function manualRefresh() {
-            const btn = document.getElementById('refresh-btn');
-            btn.classList.add('loading');
-            btn.innerHTML = '<span class="refresh-spinner"></span> Refreshing...';
-
-            try {
-                // Force fetch latest location from Firebase
-                const locRef = db.ref('user_locations/' + uid);
-                const snapshot = await locRef.get();
-                const data = snapshot.val();
-                
-                if (data) {
-                    updateLastRefreshTime();
-                    fetchMetrics(data.lat, data.lng, currentDestLat, currentDestLng);
-                }
-            } catch (e) {
-                console.error('Refresh failed:', e);
-            } finally {
-                btn.classList.remove('loading');
-                btn.innerHTML = '<i class="fas fa-sync-alt"></i> Refresh';
-            }
-        }
-
-        async function fetchMetrics(slat, slng, dlat, dlng) {
-            const url = `https://router.project-osrm.org/route/v1/driving/${slng},${slat};${dlng},${dlat}?overview=false`;
-            try {
-                const res = await fetch(url);
-                const result = await res.json();
-                if (result.routes && result.routes[0]) {
-                    const route = result.routes[0];
-                    const dist = (route.distance / 1000).toFixed(1);
-                    const dur = Math.round(route.duration / 60);
-                    
-                    document.getElementById('dist-val').innerText = dist + " km";
-                    
-                    const arrival = new Date(Date.now() + route.duration * 1000);
-                    document.getElementById('eta-val').innerText = arrival.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                }
-            } catch (e) {}
-        }
-
-        window.onload = () => {
-            initMap();
-            loadFirestoreData();
-        };
-    </script>
+    window.onload = () => {
+        initMap();
+        loadFirestoreData();
+    };
+</script>
 </body>
 </html>

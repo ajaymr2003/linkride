@@ -24,9 +24,42 @@ class _DriverPaymentConfirmPageState extends State<DriverPaymentConfirmPage> {
   bool _isSubmitting = false;
   String _selectedMethod = "cash"; // Default selection
 
-  // --- MANUAL CASH CONFIRMATION LOGIC ---
+  // --- LOGIC: PROCESS AS FREE RIDE ---
+  Future<void> _handleFreeRide() async {
+    bool confirm = await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+        title: const Text("Confirm Free Ride?"),
+        content: Text("Are you sure you want to offer this ride for free to ${widget.passengerName}? The fare will be updated to ₹0."),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Cancel")),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true), 
+            child: const Text("Confirm Free", style: TextStyle(color: Colors.blue, fontWeight: FontWeight.bold))
+          ),
+        ],
+      ),
+    ) ?? false;
+
+    if (!confirm) return;
+
+    setState(() => _isSubmitting = true);
+    try {
+      await FirebaseFirestore.instance.collection('rides').doc(widget.rideId).update({
+        'passenger_routes.${widget.passengerUid}.payment_status': 'paid',
+        'passenger_routes.${widget.passengerUid}.ride_status': 'completed',
+        'passenger_routes.${widget.passengerUid}.payment_method': 'free',
+        'passenger_routes.${widget.passengerUid}.fare': 0, // Set amount to 0
+        'passenger_routes.${widget.passengerUid}.paid_by_cash': true, // Trigger success on passenger side
+      });
+    } catch (e) {
+      _showError();
+    }
+  }
+
+  // --- LOGIC: PROCESS CASH PAYMENT ---
   Future<void> _handlePaymentReceived() async {
-    // 1. Show Confirmation Dialog
     bool confirm = await showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -46,21 +79,21 @@ class _DriverPaymentConfirmPageState extends State<DriverPaymentConfirmPage> {
     if (!confirm) return;
 
     setState(() => _isSubmitting = true);
-
     try {
-      // 2. Update status in database
       await FirebaseFirestore.instance.collection('rides').doc(widget.rideId).update({
         'passenger_routes.${widget.passengerUid}.payment_status': 'paid',
         'passenger_routes.${widget.passengerUid}.ride_status': 'completed',
         'passenger_routes.${widget.passengerUid}.payment_method': 'cash',
-        'passenger_routes.${widget.passengerUid}.paid_by_cash': true, // Custom flag for passenger detection
+        'passenger_routes.${widget.passengerUid}.paid_by_cash': true,
       });
-      
-      // Success feedback is handled by the StreamBuilder below detecting the 'paid' status
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Error updating status.")));
-      setState(() => _isSubmitting = false);
+      _showError();
     }
+  }
+
+  void _showError() {
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Error updating status.")));
+    setState(() => _isSubmitting = false);
   }
 
   @override
@@ -76,7 +109,6 @@ class _DriverPaymentConfirmPageState extends State<DriverPaymentConfirmPage> {
         var data = snapshot.data!.data() as Map<String, dynamic>;
         var pData = data['passenger_routes'][widget.passengerUid];
         
-        // CHECK FOR EITHER MANUAL CASH UPDATES OR AUTO ONLINE UPDATES
         String currentStatus = pData['payment_status'] ?? 'unpaid';
         bool isPaidOnline = pData['paid_by_online'] == true;
 
@@ -92,7 +124,7 @@ class _DriverPaymentConfirmPageState extends State<DriverPaymentConfirmPage> {
             leading: IconButton(icon: const Icon(Icons.arrow_back_ios_new, size: 20), onPressed: () => Navigator.pop(context)),
           ),
           body: Padding(
-            padding: const EdgeInsets.all(30),
+            padding: const EdgeInsets.all(25),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -107,20 +139,22 @@ class _DriverPaymentConfirmPageState extends State<DriverPaymentConfirmPage> {
                   ),
                 ),
                 
-                const SizedBox(height: 40),
-                const Text("CHOOSE METHOD", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey, letterSpacing: 1.2)),
+                const SizedBox(height: 35),
+                const Text("CHOOSE METHOD", style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey, letterSpacing: 1.2)),
                 const SizedBox(height: 15),
 
-                // --- PAYMENT METHOD SELECTION BOXES ---
+                // --- UPDATED: 3 OPTION ROW ---
                 Row(
                   children: [
                     _methodCard("Cash", Icons.payments_outlined, _selectedMethod == "cash", () => setState(() => _selectedMethod = "cash")),
-                    const SizedBox(width: 15),
+                    const SizedBox(width: 10),
                     _methodCard("Online", Icons.qr_code_scanner, _selectedMethod == "online", () => setState(() => _selectedMethod = "online")),
+                    const SizedBox(width: 10),
+                    _methodCard("Free", Icons.volunteer_activism, _selectedMethod == "free", () => setState(() => _selectedMethod = "free")),
                   ],
                 ),
 
-                const SizedBox(height: 40),
+                const SizedBox(height: 35),
                 
                 // Amount Display Card
                 Container(
@@ -134,7 +168,10 @@ class _DriverPaymentConfirmPageState extends State<DriverPaymentConfirmPage> {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       const Text("Fare to Collect", style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
-                      Text("₹${widget.price}", style: const TextStyle(fontSize: 30, fontWeight: FontWeight.bold, color: primaryGreen)),
+                      Text(
+                        _selectedMethod == "free" ? "₹0" : "₹${widget.price}", 
+                        style: TextStyle(fontSize: 30, fontWeight: FontWeight.bold, color: _selectedMethod == "free" ? Colors.blue : primaryGreen)
+                      ),
                     ],
                   ),
                 ),
@@ -144,21 +181,10 @@ class _DriverPaymentConfirmPageState extends State<DriverPaymentConfirmPage> {
                 // --- DYNAMIC ACTION FOOTER ---
                 if (_selectedMethod == "online")
                   _buildOnlineStatusFooter()
+                else if (_selectedMethod == "free")
+                  _buildActionButton("MARK AS FREE RIDE", Colors.blue, _handleFreeRide)
                 else
-                  SizedBox(
-                    width: double.infinity, height: 60,
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: primaryGreen, 
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-                        elevation: 0
-                      ),
-                      onPressed: _isSubmitting ? null : _handlePaymentReceived,
-                      child: _isSubmitting 
-                        ? const CircularProgressIndicator(color: Colors.white)
-                        : const Text("PAYMENT RECEIVED", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
-                    ),
-                  ),
+                  _buildActionButton("PAYMENT RECEIVED", primaryGreen, _handlePaymentReceived),
               ],
             ),
           ),
@@ -167,23 +193,40 @@ class _DriverPaymentConfirmPageState extends State<DriverPaymentConfirmPage> {
     );
   }
 
+  Widget _buildActionButton(String label, Color color, VoidCallback onPressed) {
+    return SizedBox(
+      width: double.infinity, height: 60,
+      child: ElevatedButton(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: color, 
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+          elevation: 0
+        ),
+        onPressed: _isSubmitting ? null : onPressed,
+        child: _isSubmitting 
+          ? const CircularProgressIndicator(color: Colors.white)
+          : Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+      ),
+    );
+  }
+
   Widget _methodCard(String label, IconData icon, bool isSelected, VoidCallback onTap) {
     return Expanded(
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(15),
         child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 25),
+          padding: const EdgeInsets.symmetric(vertical: 20),
           decoration: BoxDecoration(
             color: isSelected ? const Color(0xFF11A860).withOpacity(0.05) : Colors.white,
-            borderRadius: BorderRadius.circular(18),
+            borderRadius: BorderRadius.circular(15),
             border: Border.all(color: isSelected ? const Color(0xFF11A860) : Colors.grey.shade300, width: 2),
           ),
           child: Column(
             children: [
-              Icon(icon, color: isSelected ? const Color(0xFF11A860) : Colors.grey, size: 30),
-              const SizedBox(height: 10),
-              Text(label, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: isSelected ? const Color(0xFF11A860) : Colors.grey)),
+              Icon(icon, color: isSelected ? const Color(0xFF11A860) : Colors.grey, size: 24),
+              const SizedBox(height: 8),
+              Text(label, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: isSelected ? const Color(0xFF11A860) : Colors.grey)),
             ],
           ),
         ),
@@ -220,7 +263,7 @@ class _DriverPaymentConfirmPageState extends State<DriverPaymentConfirmPage> {
                 child: Icon(Icons.check_circle, size: 100, color: pColor),
               ),
               const SizedBox(height: 25),
-              const Text("Payment Verified!", style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold)),
+              const Text("Verified!", style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold)),
               const SizedBox(height: 10),
               const Text("The transaction is complete and the trip has ended.", textAlign: TextAlign.center, style: TextStyle(color: Colors.grey)),
               const SizedBox(height: 60),

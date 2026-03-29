@@ -9,7 +9,7 @@ import 'package:geolocator/geolocator.dart';
 import 'home/home_mode_selection.dart';
 import 'activity/rides_page.dart';
 import 'inbox/inbox_page.dart';
-import '../profile/account/account_page.dart';
+import 'account/profile/account/account_page.dart';
 
 class UserDashboard extends StatefulWidget {
   const UserDashboard({super.key});

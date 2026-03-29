@@ -29,116 +29,144 @@ class RideDetailsView extends StatelessWidget {
         backgroundColor: Colors.white,
         foregroundColor: Colors.black,
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(25),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // 1. STATUS HEADER
-            Container(
-              padding: const EdgeInsets.all(15),
-              decoration: BoxDecoration(
-                color: primaryGreen.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.check_circle, color: primaryGreen),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      "Trip Completed on ${DateFormat('EEE, MMM dd, yyyy').format(dt)}",
-                      style: TextStyle(fontWeight: FontWeight.bold, color: darkGreen),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            
-            const SizedBox(height: 35),
+      body: FutureBuilder<DocumentSnapshot>(
+        // Fetch the actual ride document to get the passenger-specific fare
+        future: FirebaseFirestore.instance.collection('rides').doc(rideId).get(),
+        builder: (context, rideSnap) {
+          // --- FARE CALCULATION LOGIC ---
+          // 1. Default to what's in the 'data' map passed to this widget
+          dynamic displayFare = data['price'] ?? data['price_per_seat'] ?? "0";
 
-            // 2. ROUTE INFO
-            const Text("ROUTE DETAILS", style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey, letterSpacing: 1)),
-            const SizedBox(height: 20),
-            _routeRow(Icons.radio_button_checked, data['source']['name'] ?? "Start", Colors.blue),
-            _routeDivider(),
-            _routeRow(Icons.location_on, data['destination']['name'] ?? "End", Colors.red),
+          // 2. If the ride document exists, try to get the specific 'fare' from passenger_routes
+          if (rideSnap.hasData && rideSnap.data!.exists) {
+            var rideDocData = rideSnap.data!.data() as Map<String, dynamic>;
+            var routes = rideDocData['passenger_routes'] ?? {};
             
-            const SizedBox(height: 40),
+            // Determine whose fare we are looking for
+            // If Driver is looking, we need the fare of the passenger mentioned in the booking
+            // If Passenger is looking, we need their own fare
+            String targetPassengerUid = isDriverView 
+                ? (data['passenger_uid'] ?? "") 
+                : currentUid;
 
-            // 3. TIME AND COST
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            if (routes.containsKey(targetPassengerUid)) {
+              displayFare = routes[targetPassengerUid]['fare'] ?? displayFare;
+            }
+          }
+
+          return SingleChildScrollView(
+            padding: const EdgeInsets.all(25),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _infoBlock("DEPARTURE TIME", DateFormat('hh:mm a').format(dt)),
-                _infoBlock("TOTAL FARE", "₹${data['price'] ?? data['price_per_seat']}"),
-              ],
-            ),
-
-            const Divider(height: 60),
-
-            // 4. FEEDBACK SECTION (NEW)
-            const Text("YOUR FEEDBACK", style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey, letterSpacing: 1)),
-            const SizedBox(height: 15),
-            _buildReviewStream(rideId, currentUid, primaryGreen),
-
-            const Divider(height: 60),
-
-            // 5. COUNTER-PARTY INFO
-            Text(isDriverView ? "PASSENGER DETAILS" : "DRIVER DETAILS", 
-                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey, letterSpacing: 1)),
-            const SizedBox(height: 20),
-            
-            FutureBuilder<DocumentSnapshot>(
-              future: FirebaseFirestore.instance
-                  .collection('users')
-                  .doc(isDriverView ? data['passenger_uid'] : data['driver_uid'])
-                  .get(),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) return const LinearProgressIndicator();
-                
-                var userData = snapshot.data?.data() as Map<String, dynamic>? ?? {};
-                String name = userData['name'] ?? "User";
-                String? pic = userData['profile_pic'];
-
-                return Container(
+                // 1. STATUS HEADER
+                Container(
                   padding: const EdgeInsets.all(15),
                   decoration: BoxDecoration(
-                    border: Border.all(color: Colors.grey.shade100),
-                    borderRadius: BorderRadius.circular(15)
+                    color: primaryGreen.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12),
                   ),
                   child: Row(
                     children: [
-                      CircleAvatar(
-                        radius: 25,
-                        backgroundColor: Colors.grey.shade200,
-                        backgroundImage: pic != null ? NetworkImage(pic) : null,
-                        child: pic == null ? const Icon(Icons.person) : null,
-                      ),
-                      const SizedBox(width: 15),
+                      Icon(Icons.check_circle, color: primaryGreen),
+                      const SizedBox(width: 12),
                       Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                            Row(
-                              children: [
-                                const Icon(Icons.star, color: Colors.amber, size: 14),
-                                const SizedBox(width: 4),
-                                Text("${userData['rating'] ?? 'New'}", style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                              ],
-                            ),
-                          ],
+                        child: Text(
+                          "Trip details for ${DateFormat('EEE, MMM dd, yyyy').format(dt)}",
+                          style: TextStyle(fontWeight: FontWeight.bold, color: darkGreen),
                         ),
                       ),
                     ],
                   ),
-                );
-              },
+                ),
+                
+                const SizedBox(height: 35),
+
+                // 2. ROUTE INFO
+                const Text("ROUTE DETAILS", style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey, letterSpacing: 1)),
+                const SizedBox(height: 20),
+                _routeRow(Icons.radio_button_checked, data['source']['name'] ?? "Start", Colors.blue),
+                _routeDivider(),
+                _routeRow(Icons.location_on, data['destination']['name'] ?? "End", Colors.red),
+                
+                const SizedBox(height: 40),
+
+                // 3. TIME AND COST
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    _infoBlock("DEPARTURE TIME", DateFormat('hh:mm a').format(dt)),
+                    // Corrected Fare display using the logic calculated above
+                    _infoBlock("TOTAL FARE", "₹$displayFare"),
+                  ],
+                ),
+
+                const Divider(height: 60),
+
+                // 4. FEEDBACK SECTION
+                const Text("YOUR FEEDBACK", style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey, letterSpacing: 1)),
+                const SizedBox(height: 15),
+                _buildReviewStream(rideId, currentUid, primaryGreen),
+
+                const Divider(height: 60),
+
+                // 5. COUNTER-PARTY INFO
+                Text(isDriverView ? "PASSENGER DETAILS" : "DRIVER DETAILS", 
+                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey, letterSpacing: 1)),
+                const SizedBox(height: 20),
+                
+                FutureBuilder<DocumentSnapshot>(
+                  future: FirebaseFirestore.instance
+                      .collection('users')
+                      .doc(isDriverView ? data['passenger_uid'] : data['driver_uid'])
+                      .get(),
+                  builder: (context, userSnapshot) {
+                    if (userSnapshot.connectionState == ConnectionState.waiting) return const LinearProgressIndicator();
+                    
+                    var userData = userSnapshot.data?.data() as Map<String, dynamic>? ?? {};
+                    String name = userData['name'] ?? "User";
+                    String? pic = userData['profile_pic'];
+
+                    return Container(
+                      padding: const EdgeInsets.all(15),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: Colors.grey.shade100),
+                        borderRadius: BorderRadius.circular(15)
+                      ),
+                      child: Row(
+                        children: [
+                          CircleAvatar(
+                            radius: 25,
+                            backgroundColor: Colors.grey.shade200,
+                            backgroundImage: pic != null ? NetworkImage(pic) : null,
+                            child: pic == null ? const Icon(Icons.person) : null,
+                          ),
+                          const SizedBox(width: 15),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                                Row(
+                                  children: [
+                                    const Icon(Icons.star, color: Colors.amber, size: 14),
+                                    const SizedBox(width: 4),
+                                    Text("${userData['rating'] ?? 'New'}", style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+                const SizedBox(height: 50),
+              ],
             ),
-            const SizedBox(height: 50),
-          ],
-        ),
+          );
+        },
       ),
     );
   }

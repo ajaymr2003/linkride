@@ -6,33 +6,41 @@ class BookingService {
   static final FirebaseFirestore _db = FirebaseFirestore.instance;
   static final DatabaseReference _rtDb = FirebaseDatabase.instance.ref();
 
+  static String _getPersistentChatId(String uid1, String uid2) {
+    List<String> ids = [uid1, uid2];
+    ids.sort(); 
+    return ids.join("_");
+  }
+
   static Future<void> acceptRequest({
     required String bookingId,
     required Map<String, dynamic> bookingData,
     required String currentDriverId,
   }) async {
-    String rId = bookingData['ride_id'];
-    String pId = bookingData['passenger_uid'];
-    String chatId = "${rId}_$pId";
+    final String rId = bookingData['ride_id'];
+    final String pId = bookingData['passenger_uid'];
     
-    // The automatic greeting message
+    // Finalized trip fare
+    final dynamic tripFare = bookingData['suggested_price'] ?? bookingData['price'] ?? 0;
+    
+    final String chatId = _getPersistentChatId(currentDriverId, pId);
     String autoMessage = "Ride accepted! Hello, I will see you at ${bookingData['source']['name']}.";
 
-    // 1. Fetch Passenger FCM Token
     DocumentSnapshot pSnap = await _db.collection('users').doc(pId).get();
     String? pToken = (pSnap.data() as Map<String, dynamic>?)?['fcm_token'];
 
-    // 2. Execute Database Transaction (Firestore)
     await _db.runTransaction((transaction) async {
       DocumentReference rideRef = _db.collection('rides').doc(rId);
+      DocumentReference chatRef = _db.collection('chats').doc(chatId);
+      DocumentReference bookingRef = _db.collection('bookings').doc(bookingId);
+      
       DocumentSnapshot rideSnap = await transaction.get(rideRef);
-
       if (!rideSnap.exists) throw "Ride not found";
       
       int seats = rideSnap['available_seats'] ?? 0;
       if (seats < 1) throw "No seats left";
 
-      // A. Update Global Ride Document
+      // 1. Update Ride Document
       transaction.update(rideRef, {
         'available_seats': seats - 1,
         'passengers': FieldValue.arrayUnion([pId]),
@@ -42,36 +50,34 @@ class BookingService {
           'passenger_name': bookingData['passenger_name'] ?? "Passenger",
           'ride_status': 'approved',
           'payment_status': 'unpaid',
+          'fare': tripFare, 
         }
       });
 
-      // B. Update Individual Booking Status
-      transaction.update(_db.collection('bookings').doc(bookingId), {
+      // 2. Update Booking Document (Sync the price here to prevent null in activity)
+      transaction.update(bookingRef, {
         'status': 'accepted',
+        'price': tripFare, // <--- Syncing price to booking doc
         'responded_at': FieldValue.serverTimestamp(),
       });
 
-      // C. ENHANCED CHAT METADATA STORAGE
-      transaction.set(_db.collection('chats').doc(chatId), {
+      // 3. Persistent Chat
+      transaction.set(chatRef, {
         'chatId': chatId,
-        'ride_id': rId,
         'driver_uid': currentDriverId,
         'passenger_uid': pId,
         'participants': [currentDriverId, pId],
-        
-        // Storing Trip Details for the Chat UI
+        'ride_id': rId, 
         'driver_name': bookingData['driver_name'] ?? "Driver",
         'passenger_name': bookingData['passenger_name'] ?? "Passenger",
-        'ride_date': bookingData['ride_date'], // Stored so chat can show trip date
-        'source': bookingData['source'],       // Exact pickup for this passenger
-        'destination': bookingData['destination'], // Exact dropoff for this passenger
-        
+        'source': bookingData['source'],
+        'destination': bookingData['destination'],
         'last_message': autoMessage,
         'last_message_time': FieldValue.serverTimestamp(),
-        'status': 'active',
-      });
+        'status': 'active', 
+      }, SetOptions(merge: true));
 
-      // D. Create In-App Notification for Passenger
+      // 4. In-App Notification
       transaction.set(_db.collection('notifications').doc(), {
         'uid': pId,
         'title': 'Ride Accepted! 🚗',
@@ -83,14 +89,12 @@ class BookingService {
       });
     });
 
-    // 3. Send Message to Realtime Database for Chat Bubbles
     await _rtDb.child("messages/$chatId").push().set({
       'senderId': 'system',
       'text': autoMessage,
       'timestamp': ServerValue.timestamp,
     });
 
-    // 4. Trigger Push Notification
     if (pToken != null && pToken.isNotEmpty) {
       await FCMService.sendPushNotification(
         token: pToken,

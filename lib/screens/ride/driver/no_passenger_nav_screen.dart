@@ -5,6 +5,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 
@@ -22,14 +23,16 @@ class _NoPassengerNavScreenState extends State<NoPassengerNavScreen> {
   final MapController _mapController = MapController();
   final String _myUid = FirebaseAuth.instance.currentUser!.uid;
 
+  late String _currentRideId;
+  late Map<String, dynamic> _currentRideData;
   LatLng? _currentPos;
   late LatLng _destinationPos;
   List<LatLng> _routePoints = [];
 
-  // Metrics
   double _speed = 0.0;
   String _distance = "-- km";
   String _duration = "-- min";
+  bool _isEndingRide = false;
 
   StreamSubscription<Position>? _positionStream;
   bool _isFirstLoad = true;
@@ -37,163 +40,227 @@ class _NoPassengerNavScreenState extends State<NoPassengerNavScreen> {
   @override
   void initState() {
     super.initState();
-    // 1. Get destination from Ride Data
-    _destinationPos = LatLng(
-      widget.rideData['destination']['lat'],
-      widget.rideData['destination']['lng'],
-    );
-
-    // 2. Start GPS Tracking
+    _currentRideId = widget.rideId;
+    _currentRideData = widget.rideData;
+    _updateInternalDestination();
+    _fetchInitialLocationFromRTDB();
     _startLocationTracking();
   }
 
+  void _updateInternalDestination() {
+    _destinationPos = LatLng(
+      _currentRideData['destination']['lat'],
+      _currentRideData['destination']['lng'],
+    );
+    _fetchRouteToDestination();
+  }
+
+  // --- END RIDE LOGIC ---
+  Future<void> _handleDestinationReached() async {
+    bool confirm = await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Destination Reached?"),
+        content: const Text("This will mark this specific ride as completed and end the navigation."),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("No")),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true), 
+            child: const Text("Yes, Finish", style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold))
+          ),
+        ],
+      ),
+    ) ?? false;
+
+    if (!confirm) return;
+
+    setState(() => _isEndingRide = true);
+
+    try {
+      // 1. Update Firestore status
+      await FirebaseFirestore.instance
+          .collection('rides')
+          .doc(_currentRideId)
+          .update({
+            'status': 'completed',
+            'ride_status': 'completed',
+            'completed_at': FieldValue.serverTimestamp(),
+          });
+
+      if (!mounted) return;
+
+      // 2. Check if there are other rides today
+      final now = DateTime.now();
+      final startOfDay = Timestamp.fromDate(DateTime(now.year, now.month, now.day));
+      final endOfDay = Timestamp.fromDate(DateTime(now.year, now.month, now.day, 23, 59));
+
+      var otherRidesQuery = await FirebaseFirestore.instance
+          .collection('rides')
+          .where('driver_uid', isEqualTo: _myUid)
+          .where('departure_time', isGreaterThanOrEqualTo: startOfDay)
+          .where('departure_time', isLessThanOrEqualTo: endOfDay)
+          .where('status', isEqualTo: 'active')
+          .get();
+
+      if (otherRidesQuery.docs.isNotEmpty) {
+        // Switch to the first available ride found
+        var nextRide = otherRidesQuery.docs.first;
+        setState(() {
+          _currentRideId = nextRide.id;
+          _currentRideData = nextRide.data();
+          _isEndingRide = false;
+          _updateInternalDestination();
+        });
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Ride completed! Switching to next trip.")));
+      } else {
+        // No more rides, go back
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("All rides completed. Well done!")));
+      }
+    } catch (e) {
+      setState(() => _isEndingRide = false);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
+    }
+  }
+
+  // --- RTDB FETCH ---
+  Future<void> _fetchInitialLocationFromRTDB() async {
+    try {
+      final snapshot = await FirebaseDatabase.instance.ref('user_locations/$_myUid').get();
+      if (snapshot.exists) {
+        final data = Map<dynamic, dynamic>.from(snapshot.value as Map);
+        LatLng rtdbPos = LatLng((data['lat'] as num).toDouble(), (data['lng'] as num).toDouble());
+        if (mounted) {
+          setState(() => _currentPos = rtdbPos);
+          _mapController.move(rtdbPos, 15);
+          _fetchRouteToDestination();
+        }
+      }
+    } catch (e) { debugPrint("RTDB Fetch Error: $e"); }
+  }
+
+  // --- GPS TRACKING ---
   void _startLocationTracking() {
     _positionStream = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.bestForNavigation,
-        distanceFilter: 10, // Update every 10 meters
-      ),
+      locationSettings: const LocationSettings(accuracy: LocationAccuracy.bestForNavigation, distanceFilter: 10),
     ).listen((Position pos) {
       if (mounted) {
         LatLng newPos = LatLng(pos.latitude, pos.longitude);
-        setState(() {
-          _currentPos = newPos;
-          _speed = pos.speed * 3.6; // Convert m/s to km/h
-        });
-
-        // Update RTDB for safety/sync
+        setState(() { _currentPos = newPos; _speed = pos.speed * 3.6; });
         FirebaseDatabase.instance.ref('user_locations/$_myUid').update({
-          'lat': pos.latitude,
-          'lng': pos.longitude,
-          'is_active': true,
-          'last_updated': ServerValue.timestamp,
+          'lat': pos.latitude, 'lng': pos.longitude, 'is_active': true, 'last_updated': ServerValue.timestamp,
         });
-
-        // Update Map View
-        if (_isFirstLoad) {
-          _mapController.move(newPos, 15);
-          _isFirstLoad = false;
-        }
-
-        // Fetch Road Route from OSRM
-        _fetchRoute();
+        if (_isFirstLoad) { _mapController.move(newPos, 15); _isFirstLoad = false; }
+        _fetchRouteToDestination();
       }
     });
   }
 
-  Future<void> _fetchRoute() async {
+  Future<void> _fetchRouteToDestination() async {
     if (_currentPos == null) return;
-
-    final url = Uri.parse(
-        'http://router.project-osrm.org/route/v1/driving/${_currentPos!.longitude},${_currentPos!.latitude};${_destinationPos.longitude},${_destinationPos.latitude}?overview=full&geometries=geojson');
-
+    final url = Uri.parse('http://router.project-osrm.org/route/v1/driving/${_currentPos!.longitude},${_currentPos!.latitude};${_destinationPos.longitude},${_destinationPos.latitude}?overview=full&geometries=geojson');
     try {
       final response = await http.get(url);
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         final route = data['routes'][0];
-
-        setState(() {
-          // Parse coordinates for the polyline
-          _routePoints = (route['geometry']['coordinates'] as List)
-              .map((c) => LatLng(c[1], c[0]))
-              .toList();
-
-          // Parse Distance (convert meters to km)
-          double distKm = route['distance'] / 1000;
-          _distance = "${distKm.toStringAsFixed(1)} km";
-
-          // Parse Duration (convert seconds to minutes)
-          double durMin = route['duration'] / 60;
-          _duration = "${durMin.toStringAsFixed(0)} min";
-        });
+        if (mounted) {
+          setState(() {
+            _routePoints = (route['geometry']['coordinates'] as List).map((c) => LatLng(c[1], c[0])).toList();
+            _distance = "${(route['distance'] / 1000).toStringAsFixed(1)} km";
+            _duration = "${(route['duration'] / 60).toStringAsFixed(0)} min";
+          });
+        }
       }
-    } catch (e) {
-      debugPrint("Route Fetch Error: $e");
-    }
+    } catch (e) { debugPrint("Route Error: $e"); }
   }
 
   @override
-  void dispose() {
-    _positionStream?.cancel();
-    FirebaseDatabase.instance.ref('user_locations/$_myUid').update({'is_active': false});
-    super.dispose();
-  }
+  void dispose() { _positionStream?.cancel(); super.dispose(); }
 
   @override
   Widget build(BuildContext context) {
+    final now = DateTime.now();
+    final startOfDay = Timestamp.fromDate(DateTime(now.year, now.month, now.day));
+    final endOfDay = Timestamp.fromDate(DateTime(now.year, now.month, now.day, 23, 59));
+
     return Scaffold(
       body: Stack(
         children: [
-          // 1. THE MAP
           FlutterMap(
             mapController: _mapController,
-            options: MapOptions(
-              initialCenter: _currentPos ?? const LatLng(11.25, 75.78),
-              initialZoom: 15,
-            ),
+            options: MapOptions(initialCenter: _currentPos ?? _destinationPos, initialZoom: 15),
             children: [
-              TileLayer(
-                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                userAgentPackageName: 'com.example.linkride',
-              ),
-              if (_routePoints.isNotEmpty)
-                PolylineLayer(
-                  polylines: [
-                    Polyline(points: _routePoints, color: Colors.blueAccent, strokeWidth: 6),
-                  ],
-                ),
-              MarkerLayer(
-                markers: [
-                  // My Car
-                  if (_currentPos != null)
-                    Marker(
-                      point: _currentPos!,
-                      child: const Icon(Icons.navigation, color: Colors.blue, size: 40),
-                    ),
-                  // Destination
-                  Marker(
-                    point: _destinationPos,
-                    child: const Icon(Icons.location_on, color: Colors.red, size: 40),
-                  ),
-                ],
-              ),
+              TileLayer(urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', userAgentPackageName: 'com.linkride.app'),
+              if (_routePoints.isNotEmpty) PolylineLayer(polylines: [Polyline(points: _routePoints, color: Colors.blueAccent, strokeWidth: 6)]),
+              MarkerLayer(markers: [
+                if (_currentPos != null) Marker(point: _currentPos!, child: const Icon(Icons.navigation, color: Colors.blue, size: 40)),
+                Marker(point: _destinationPos, child: const Icon(Icons.location_on, color: Colors.red, size: 45)),
+              ]),
             ],
           ),
 
-          // 2. BACK BUTTON
+          // TOP BANNER / SWITCHER
           Positioned(
-            top: 50,
-            left: 20,
-            child: CircleAvatar(
-              backgroundColor: Colors.white,
-              child: IconButton(
-                icon: const Icon(Icons.arrow_back, color: Colors.black),
-                onPressed: () => Navigator.pop(context),
-              ),
+            top: 50, left: 0, right: 0,
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    const SizedBox(width: 20),
+                    CircleAvatar(backgroundColor: Colors.white, child: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => Navigator.pop(context))),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                StreamBuilder<QuerySnapshot>(
+                  stream: FirebaseFirestore.instance
+                      .collection('rides')
+                      .where('driver_uid', isEqualTo: _myUid)
+                      .where('departure_time', isGreaterThanOrEqualTo: startOfDay)
+                      .where('departure_time', isLessThanOrEqualTo: endOfDay)
+                      .where('status', isEqualTo: 'active') // Only show active rides
+                      .snapshots(),
+                  builder: (context, snapshot) {
+                    if (!snapshot.hasData || snapshot.data!.docs.length <= 1) return const SizedBox.shrink();
+                    var rides = snapshot.data!.docs;
+                    return Container(
+                      height: 60,
+                      margin: const EdgeInsets.symmetric(horizontal: 20),
+                      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(15), boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 10)]),
+                      child: ListView.builder(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: rides.length,
+                        itemBuilder: (context, index) {
+                          var rDoc = rides[index];
+                          var rData = rDoc.data() as Map<String, dynamic>;
+                          bool isCurrent = rDoc.id == _currentRideId;
+                          return GestureDetector(
+                            onTap: () { setState(() { _currentRideId = rDoc.id; _currentRideData = rData; _updateInternalDestination(); }); },
+                            child: Container(
+                              margin: const EdgeInsets.all(8), padding: const EdgeInsets.symmetric(horizontal: 15),
+                              decoration: BoxDecoration(color: isCurrent ? Colors.blue : Colors.grey.shade100, borderRadius: BorderRadius.circular(10)),
+                              alignment: Alignment.center,
+                              child: Text("To ${rData['destination']['name']}", style: TextStyle(color: isCurrent ? Colors.white : Colors.black87, fontWeight: FontWeight.bold, fontSize: 11)),
+                            ),
+                          );
+                        },
+                      ),
+                    );
+                  },
+                ),
+              ],
             ),
           ),
 
-          // 3. METRICS PANEL
+          // BOTTOM PANEL
           Positioned(
-            bottom: 0,
-            left: 0,
-            right: 0,
+            bottom: 0, left: 0, right: 0,
             child: Container(
               padding: const EdgeInsets.all(25),
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
-                boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 15)],
-              ),
+              decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(30)), boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 15)]),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text(
-                    "Driving to Destination",
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.grey),
-                  ),
-                  const SizedBox(height: 20),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceAround,
                     children: [
@@ -202,11 +269,20 @@ class _NoPassengerNavScreenState extends State<NoPassengerNavScreen> {
                       _metricItem("Speed", "${_speed.toStringAsFixed(0)} km/h", Icons.speed),
                     ],
                   ),
-                  const SizedBox(height: 20),
-                  const Text(
-                    "No passengers yet. We'll alert you if someone joins.",
-                    style: TextStyle(color: Colors.orange, fontSize: 12, fontWeight: FontWeight.w500),
-                    textAlign: TextAlign.center,
+                  const SizedBox(height: 25),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 55,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF2B5145), // Dark green theme
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15))
+                      ),
+                      onPressed: _isEndingRide ? null : _handleDestinationReached,
+                      child: _isEndingRide 
+                        ? const CircularProgressIndicator(color: Colors.white) 
+                        : const Text("DESTINATION REACHED", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, letterSpacing: 1)),
+                    ),
                   ),
                 ],
               ),

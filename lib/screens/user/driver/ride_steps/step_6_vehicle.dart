@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import '../../profile/about/vehicle/add_vehicle_page.dart';
+import '../../dashboard/account/profile/about/vehicle/add_vehicle_page.dart';
 
 class RideStepVehicle extends StatelessWidget {
   final Function(Map<String, dynamic>) onVehicleSelected;
