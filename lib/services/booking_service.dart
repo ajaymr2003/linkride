@@ -1,12 +1,11 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_database/firebase_database.dart'; // <--- ADDED
+import 'package:firebase_database/firebase_database.dart';
 import 'fcm_service.dart';
 
 class BookingService {
   static final FirebaseFirestore _db = FirebaseFirestore.instance;
-  static final DatabaseReference _rtDb = FirebaseDatabase.instance.ref(); // <--- ADDED
+  static final DatabaseReference _rtDb = FirebaseDatabase.instance.ref();
 
-  /// Centralized logic to accept a ride request
   static Future<void> acceptRequest({
     required String bookingId,
     required Map<String, dynamic> bookingData,
@@ -14,13 +13,10 @@ class BookingService {
   }) async {
     String rId = bookingData['ride_id'];
     String pId = bookingData['passenger_uid'];
-    String destName = bookingData['destination']['name'] ?? "Destination";
-    String sourceName = bookingData['source']['name'] ?? "Pickup";
-    Timestamp rideTime = bookingData['ride_date'];
     String chatId = "${rId}_$pId";
     
     // The automatic greeting message
-    String autoMessage = "Ride accepted! Hello, I will see you at $sourceName.";
+    String autoMessage = "Ride accepted! Hello, I will see you at ${bookingData['source']['name']}.";
 
     // 1. Fetch Passenger FCM Token
     DocumentSnapshot pSnap = await _db.collection('users').doc(pId).get();
@@ -36,7 +32,7 @@ class BookingService {
       int seats = rideSnap['available_seats'] ?? 0;
       if (seats < 1) throw "No seats left";
 
-      // A. Update Ride Document
+      // A. Update Global Ride Document
       transaction.update(rideRef, {
         'available_seats': seats - 1,
         'passengers': FieldValue.arrayUnion([pId]),
@@ -49,60 +45,65 @@ class BookingService {
         }
       });
 
-      // B. Update Booking Status
+      // B. Update Individual Booking Status
       transaction.update(_db.collection('bookings').doc(bookingId), {
         'status': 'accepted',
         'responded_at': FieldValue.serverTimestamp(),
       });
 
-      // C. Setup Chat Metadata in Firestore
+      // C. ENHANCED CHAT METADATA STORAGE
       transaction.set(_db.collection('chats').doc(chatId), {
         'chatId': chatId,
+        'ride_id': rId,
+        'driver_uid': currentDriverId,
+        'passenger_uid': pId,
         'participants': [currentDriverId, pId],
+        
+        // Storing Trip Details for the Chat UI
         'driver_name': bookingData['driver_name'] ?? "Driver",
         'passenger_name': bookingData['passenger_name'] ?? "Passenger",
-        'last_message': autoMessage, // Updated to the auto message
+        'ride_date': bookingData['ride_date'], // Stored so chat can show trip date
+        'source': bookingData['source'],       // Exact pickup for this passenger
+        'destination': bookingData['destination'], // Exact dropoff for this passenger
+        
+        'last_message': autoMessage,
         'last_message_time': FieldValue.serverTimestamp(),
+        'status': 'active',
       });
 
-      // D. Create In-App Notification
+      // D. Create In-App Notification for Passenger
       transaction.set(_db.collection('notifications').doc(), {
         'uid': pId,
         'title': 'Ride Accepted! 🚗',
-        'message': 'Your trip to $destName is confirmed.',
+        'message': 'Your trip to ${bookingData['destination']['name']} is confirmed.',
         'type': 'ride_approved',
         'timestamp': FieldValue.serverTimestamp(),
         'isRead': false,
-        'source_name': sourceName,
-        'destination_name': destName,
-        'ride_time': rideTime,
         'ride_id': rId,
       });
     });
 
-    // 3. SEND AUTOMATIC MESSAGE TO REALTIME DATABASE
-    // This makes the message actually appear inside the Chat Screen bubbles
+    // 3. Send Message to Realtime Database for Chat Bubbles
     await _rtDb.child("messages/$chatId").push().set({
-      'senderId': 'system', // Marked as system or currentDriverId
+      'senderId': 'system',
       'text': autoMessage,
       'timestamp': ServerValue.timestamp,
     });
 
-    // 4. Trigger External Push Notification (FCM)
+    // 4. Trigger Push Notification
     if (pToken != null && pToken.isNotEmpty) {
       await FCMService.sendPushNotification(
         token: pToken,
         title: "Ride Accepted! 🚗",
-        body: "The driver accepted your ride to $destName.",
+        body: "The driver accepted your ride to ${bookingData['destination']['name']}.",
       );
     }
   }
 
-  /// Logic to reject a ride request
   static Future<void> rejectRequest(String bookingId) async {
     await _db.collection('bookings').doc(bookingId).update({
       'status': 'rejected',
       'responded_at': FieldValue.serverTimestamp(),
     });
   }
-} 
+}
