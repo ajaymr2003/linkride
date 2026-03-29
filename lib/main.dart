@@ -5,6 +5,7 @@ import 'firebase_options.dart';
 import 'screens/no_internet_screen.dart';
 import 'services/connectivity_service.dart';
 import 'screens/auth/auth_gate.dart';
+import 'services/ride_cleanup_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -12,51 +13,31 @@ void main() async {
   // 1. Initialize Firebase
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
-  // 2. Request Notification Permissions (Crucial for Android 13+)
+  // 2. Setup Notifications
   FirebaseMessaging messaging = FirebaseMessaging.instance;
-  NotificationSettings settings = await messaging.requestPermission(
-    alert: true,
-    badge: true,
-    sound: true,
-  );
-
-  // 3. Set Foreground Notification Options
-  // This allows notifications to show as popups even when the app is OPEN
+  await messaging.requestPermission(alert: true, badge: true, sound: true);
   await FirebaseMessaging.instance.setForegroundNotificationPresentationOptions(
-    alert: true, // Required for heads-up notification
-    badge: true,
-    sound: true,
+    alert: true, badge: true, sound: true,
   );
-
-  print('🔔 User granted notification permission: ${settings.authorizationStatus}');
 
   runApp(const MyApp());
 }
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
-
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        primarySwatch: Colors.green, // Matches your LinkRide theme
-        useMaterial3: true,
-      ),
-      // Home uses your NetworkWrapper logic to handle offline states
+      theme: ThemeData(primarySwatch: Colors.green, useMaterial3: true),
       home: const NetworkWrapper(child: AuthGate()), 
     );
   }
 }
 
-/// A wrapper that listens to connectivity changes and shows a 
-/// No Internet screen overlay when the device is offline.
 class NetworkWrapper extends StatefulWidget {
   final Widget child;
-
   const NetworkWrapper({super.key, required this.child});
-
   @override
   State<NetworkWrapper> createState() => _NetworkWrapperState();
 }
@@ -64,6 +45,7 @@ class NetworkWrapper extends StatefulWidget {
 class _NetworkWrapperState extends State<NetworkWrapper> {
   late Stream<bool> _connectivityStream;
   bool _isOnline = true;
+  bool _isCheckingInitialStatus = true; 
 
   @override
   void initState() {
@@ -74,34 +56,56 @@ class _NetworkWrapperState extends State<NetworkWrapper> {
 
   Future<void> _checkInitialConnection() async {
     final isOnline = await ConnectivityService().hasInternetConnection();
+    
+    if (isOnline) {
+      // Run cleanup safely in the background
+      _runStartupCleanup();
+    }
+
     if (mounted) {
       setState(() {
         _isOnline = isOnline;
+        _isCheckingInitialStatus = false; 
       });
+    }
+  }
+
+  // Safe wrapper for the cleanup service
+  Future<void> _runStartupCleanup() async {
+    try {
+      await RideCleanupService.globalRideCleanup();
+    } catch (e) {
+      debugPrint("Startup Cleanup Failed: $e");
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_isCheckingInitialStatus) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
     return StreamBuilder<bool>(
       stream: _connectivityStream,
       initialData: _isOnline,
       builder: (context, snapshot) {
-        final bool currentOnlineStatus = snapshot.data ?? true;
+        final bool currentOnlineStatus = snapshot.data ?? _isOnline;
+
+        // If internet just came back, trigger cleanup
+        if (currentOnlineStatus == true) {
+          _runStartupCleanup();
+        }
 
         return Stack(
           children: [
-            // Layer 1: The actual App logic (AuthGate -> UserDashboard)
             widget.child,
-
-            // Layer 2: The No Internet Popup (Only visible when offline)
             if (!currentOnlineStatus)
               Positioned.fill(
-                child: NoInternetScreen(
-                  onRetry: () async {
-                    // Force a re-check when the user taps OK/Retry
-                    await _checkInitialConnection();
-                  },
+                child: Material(
+                  color: Colors.transparent,
+                  child: NoInternetScreen(
+                    onRetry: () async { await _checkInitialConnection(); },
+                  ),
                 ),
               ),
           ],

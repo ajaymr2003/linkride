@@ -3,7 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
 import '../home/edit_ride_page.dart';
-import 'package:linkride/screens/user/dashboard/home/edit_ride_page.dart';
+import 'ride_details_view.dart'; // Import the details page
 
 class OfferedRidesPage extends StatefulWidget {
   const OfferedRidesPage({super.key});
@@ -72,55 +72,68 @@ class _OfferedRidesPageState extends State<OfferedRidesPage> {
                   DateTime dt = (data['departure_time'] as Timestamp).toDate();
                   List passengers = data['passengers'] ?? [];
 
-                  return Container(
-                    margin: const EdgeInsets.only(bottom: 12),
-                    padding: const EdgeInsets.all(15),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(15),
-                      border: Border.all(color: Colors.grey.shade200),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(DateFormat('EEE, d MMM • h:mm a').format(dt), 
-                                style: const TextStyle(fontSize: 12, color: Colors.grey, fontWeight: FontWeight.bold)),
-                            if (_showUpcoming)
-                              IconButton(
-                                icon: const Icon(Icons.edit_outlined, size: 20, color: Colors.blue),
-                                onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => EditRidePage(docId: doc.id, initialData: data))),
-                              )
-                            else
-                              const Icon(Icons.check_circle, color: Colors.grey, size: 20),
-                          ],
-                        ),
-                        _locationRow(Icons.circle_outlined, data['source']['name'] ?? "Source", Colors.grey),
-                        _locationRow(Icons.location_on, data['destination']['name'] ?? "Dest", primaryGreen),
-                        
-                        const Divider(height: 25),
+                  return InkWell(
+                    onTap: () {
+                      // Navigate to details if the trip is completed
+                      if (!_showUpcoming) {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => RideDetailsView(data: data, isDriverView: true),
+                          ),
+                        );
+                      }
+                    },
+                    child: Container(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      padding: const EdgeInsets.all(15),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(15),
+                        border: Border.all(color: Colors.grey.shade200),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(DateFormat('EEE, d MMM • h:mm a').format(dt), 
+                                  style: const TextStyle(fontSize: 12, color: Colors.grey, fontWeight: FontWeight.bold)),
+                              if (_showUpcoming)
+                                IconButton(
+                                  icon: const Icon(Icons.edit_outlined, size: 20, color: Colors.blue),
+                                  onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => EditRidePage(docId: doc.id, initialData: data))),
+                                )
+                              else
+                                const Icon(Icons.check_circle, color: Colors.blue, size: 20),
+                            ],
+                          ),
+                          _locationRow(Icons.circle_outlined, data['source']['name'] ?? "Source", Colors.grey),
+                          _locationRow(Icons.location_on, data['destination']['name'] ?? "Dest", primaryGreen),
+                          
+                          const Divider(height: 25),
 
-                        // --- NEW: PASSENGER NAMES SECTION ---
-                        if (passengers.isNotEmpty) ...[
-                          const Text("Confirmed Passengers:", style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey)),
-                          const SizedBox(height: 8),
-                          _buildPassengerNames(passengers),
-                          const SizedBox(height: 12),
+                          // --- PASSENGER NAMES SECTION (Existing function) ---
+                          if (passengers.isNotEmpty) ...[
+                            const Text("Confirmed Passengers:", style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey)),
+                            const SizedBox(height: 8),
+                            _buildPassengerNames(passengers),
+                            const SizedBox(height: 12),
+                          ],
+
+                          Row(
+                            children: [
+                              const Icon(Icons.airline_seat_recline_normal, size: 16, color: Colors.grey),
+                              const SizedBox(width: 5),
+                              Text(_showUpcoming ? "${data['available_seats']} seats left" : "Ride Completed", 
+                                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
+                              const Spacer(),
+                              Text("₹${data['price_per_seat']}", style: TextStyle(color: primaryGreen, fontWeight: FontWeight.bold, fontSize: 16)),
+                            ],
+                          ),
                         ],
-
-                        Row(
-                          children: [
-                            const Icon(Icons.airline_seat_recline_normal, size: 16, color: Colors.grey),
-                            const SizedBox(width: 5),
-                            Text(_showUpcoming ? "${data['available_seats']} seats left" : "Ride Finished", 
-                                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
-                            const Spacer(),
-                            Text("₹${data['price_per_seat']}", style: TextStyle(color: primaryGreen, fontWeight: FontWeight.bold, fontSize: 16)),
-                          ],
-                        ),
-                      ],
+                      ),
                     ),
                   );
                 },
@@ -132,20 +145,16 @@ class _OfferedRidesPageState extends State<OfferedRidesPage> {
     );
   }
 
-  // --- HELPER: FETCH AND BUILD PASSENGER NAMES ---
+  // --- HELPER: FETCH AND BUILD PASSENGER NAMES (Existing function) ---
   Widget _buildPassengerNames(List uids) {
     return FutureBuilder<QuerySnapshot>(
-      // Query users collection where document ID is in the passengers list
       future: FirebaseFirestore.instance
           .collection('users')
           .where(FieldPath.documentId, whereIn: uids)
           .get(),
       builder: (context, snapshot) {
         if (!snapshot.hasData) return const Text("Loading...", style: TextStyle(fontSize: 12));
-        
-        // Extract names from documents
         List names = snapshot.data!.docs.map((d) => d['name'].toString().split(' ')[0]).toList();
-
         return Wrap(
           spacing: 8,
           children: names.map((name) => Container(

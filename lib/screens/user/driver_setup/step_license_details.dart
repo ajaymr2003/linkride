@@ -5,11 +5,12 @@ import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:crop_image/crop_image.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:cloud_firestore/cloud_firestore.dart'; // Added
+import 'package:firebase_auth/firebase_auth.dart'; // Added
+import '../../../services/cloudinary_service.dart'; // Added
 
 class StepLicenseDetails extends StatefulWidget {
-  final bool isSubmitting;
-  final Function(String, File, File) onFinalSubmit;
-  const StepLicenseDetails({super.key, required this.isSubmitting, required this.onFinalSubmit});
+  const StepLicenseDetails({super.key}); // Removed parameters as we handle logic internally
 
   @override
   State<StepLicenseDetails> createState() => _StepLicenseDetailsState();
@@ -22,13 +23,15 @@ class _StepLicenseDetailsState extends State<StepLicenseDetails> {
   File? _frontFinal, _backFinal;
   File? _tempRawFile; 
   
-  // Cropping Logic
+  // Logic States
   bool _isCropping = false;
-  bool _isFrontTarget = true; // Tracks if we are cropping front or back
-  final _cropController = CropController(aspectRatio: 3 / 2); // ID Card Shape
-
+  bool _isFrontTarget = true; 
+  bool _isSaving = false; // Internal loading state
+  
+  final _cropController = CropController(aspectRatio: 3 / 2); 
   final Color primaryGreen = const Color(0xFF11A860);
   final RegExp dlRegex = RegExp(r'^[A-Z]{2}[0-9]{2}[0-9]{4}[0-9]{7}$');
+  final String uid = FirebaseAuth.instance.currentUser!.uid; // Get UID
 
   // 1. Pick Image
   Future<void> _pickImage(bool isFront) async {
@@ -42,7 +45,7 @@ class _StepLicenseDetailsState extends State<StepLicenseDetails> {
     }
   }
 
-  // 2. Process Crop (Same logic as Profile)
+  // 2. Process Crop
   Future<void> _processCrop() async {
     ui.Image bitmap = await _cropController.croppedBitmap();
     final data = await bitmap.toByteData(format: ui.ImageByteFormat.png);
@@ -64,6 +67,42 @@ class _StepLicenseDetailsState extends State<StepLicenseDetails> {
     });
   }
 
+  // --- NEW: UPLOAD TO CLOUDINARY AND SAVE ALL TO FIRESTORE ---
+  Future<void> _saveAndFinish(String dlClean) async {
+    setState(() => _isSaving = true);
+
+    try {
+      // 1. Upload both images in parallel
+      final results = await Future.wait([
+        CloudinaryService.uploadImage(_frontFinal!),
+        CloudinaryService.uploadImage(_backFinal!),
+      ]);
+
+      String? frontUrl = results[0];
+      String? backUrl = results[1];
+
+      if (frontUrl != null && backUrl != null) {
+        // 2. Update Firestore document
+        await FirebaseFirestore.instance.collection('users').doc(uid).update({
+          'license_number': dlClean,
+          'license_front': frontUrl,
+          'license_back': backUrl,
+        });
+
+        // 3. Return to Hub
+        if (mounted) Navigator.pop(context);
+      } else {
+        throw Exception("One or more images failed to upload");
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Submission error: $e"), backgroundColor: Colors.red),
+      );
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     String dlClean = _dlController.text.replaceAll(" ", "").toUpperCase();
@@ -79,12 +118,14 @@ class _StepLicenseDetailsState extends State<StepLicenseDetails> {
       },
       child: Scaffold(
         backgroundColor: Colors.white,
-        body: _isCropping ? _buildCropperView() : _buildMainForm(dlClean, isValid),
+        appBar: _isCropping ? null : AppBar(backgroundColor: Colors.white, elevation: 0, foregroundColor: Colors.black),
+        body: _isSaving 
+          ? const Center(child: CircularProgressIndicator(color: Color(0xFF11A860)))
+          : (_isCropping ? _buildCropperView() : _buildMainForm(dlClean, isValid)),
       ),
     );
   }
 
-  // --- VIEW 1: THE CROPPER ---
   Widget _buildCropperView() {
     return Column(
       children: [
@@ -118,7 +159,6 @@ class _StepLicenseDetailsState extends State<StepLicenseDetails> {
     );
   }
 
-  // --- VIEW 2: THE FORM ---
   Widget _buildMainForm(String dlClean, bool isValid) {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(25),
@@ -160,12 +200,8 @@ class _StepLicenseDetailsState extends State<StepLicenseDetails> {
                 backgroundColor: primaryGreen,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
               ),
-              onPressed: (isValid && !widget.isSubmitting) 
-                  ? () => widget.onFinalSubmit(dlClean, _frontFinal!, _backFinal!) 
-                  : null,
-              child: widget.isSubmitting 
-                  ? const CircularProgressIndicator(color: Colors.white) 
-                  : const Text("SUBMIT APPLICATION", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              onPressed: isValid ? () => _saveAndFinish(dlClean) : null,
+              child: const Text("SAVE LICENSE", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
             ),
           ),
         ],

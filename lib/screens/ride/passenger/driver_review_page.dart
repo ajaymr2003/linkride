@@ -25,30 +25,92 @@ class _DriverReviewPageState extends State<DriverReviewPage> {
 
   final Color primaryGreen = const Color(0xFF11A860);
 
+  // Helper to update the user's average star rating
+  Future<void> _updateUserAverageRating(String userId) async {
+    final reviewsQuery = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(userId)
+        .collection('reviews_received')
+        .get();
+
+    if (reviewsQuery.docs.isNotEmpty) {
+      double totalRating = 0;
+      for (var doc in reviewsQuery.docs) {
+        totalRating += (doc.data()['rating'] as num).toDouble();
+      }
+      double average = totalRating / reviewsQuery.docs.length;
+
+      await FirebaseFirestore.instance.collection('users').doc(userId).update({
+        'rating': double.parse(average.toStringAsFixed(1)),
+        'total_reviews': reviewsQuery.docs.length,
+      });
+    }
+  }
+
   Future<void> _submitReview() async {
+    if (_isSubmitting) return;
     setState(() => _isSubmitting = true);
+
     final String passengerUid = FirebaseAuth.instance.currentUser!.uid;
+    final String comment = _commentController.text.trim();
 
     try {
-      await FirebaseFirestore.instance
+      final batch = FirebaseFirestore.instance.batch();
+
+      // 1. Prepare Review Data
+      Map<String, dynamic> reviewData = {
+        'rating': _rating,
+        'comment': comment,
+        'reviewer_id': passengerUid,
+        'target_id': widget.driverUid,
+        'ride_id': widget.rideId,
+        'type': 'driver_review',
+        'timestamp': FieldValue.serverTimestamp(),
+      };
+
+      // 2. Global collection entry
+      DocumentReference globalRef = FirebaseFirestore.instance.collection('reviews').doc();
+      batch.set(globalRef, reviewData);
+
+      // 3. Driver's sub-collection entry
+      DocumentReference userSubRef = FirebaseFirestore.instance
           .collection('users')
           .doc(widget.driverUid)
           .collection('reviews_received')
-          .add({
-        'rating': _rating,
-        'comment': _commentController.text.trim(),
-        'reviewer_id': passengerUid,
-        'ride_id': widget.rideId,
-        'timestamp': FieldValue.serverTimestamp(),
-      });
+          .doc(globalRef.id);
+      batch.set(userSubRef, reviewData);
+
+      // --- NEW: UPDATE BOOKING STATUS ---
+      // We find the booking for this specific passenger and this specific ride
+      var bookingQuery = await FirebaseFirestore.instance
+          .collection('bookings')
+          .where('ride_id', isEqualTo: widget.rideId)
+          .where('passenger_uid', isEqualTo: passengerUid)
+          .limit(1)
+          .get();
+
+      if (bookingQuery.docs.isNotEmpty) {
+        batch.update(bookingQuery.docs.first.reference, {
+          'status': 'completed',
+          'completed_at': FieldValue.serverTimestamp(),
+        });
+      }
+
+      // Execute all updates
+      await batch.commit();
+
+      // 4. Update Driver profile rating stats
+      await _updateUserAverageRating(widget.driverUid);
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Feedback submitted!")));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Feedback submitted and trip completed!")));
         Navigator.of(context).popUntil((route) => route.isFirst);
       }
     } catch (e) {
       setState(() => _isSubmitting = false);
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Error submitting review.")));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Error submitting review.")));
+      }
     }
   }
 

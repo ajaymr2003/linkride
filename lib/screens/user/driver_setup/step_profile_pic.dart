@@ -2,14 +2,16 @@ import 'dart:io';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
-import 'package:image_picker/image_picker.dart'; // For Gallery
+import 'package:image_picker/image_picker.dart';
 import 'package:crop_image/crop_image.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:cloud_firestore/cloud_firestore.dart'; // Added
+import 'package:firebase_auth/firebase_auth.dart'; // Added
+import '../../../services/cloudinary_service.dart'; // Added
 
 class StepProfilePic extends StatefulWidget {
-  final Function(File) onNext;
-  const StepProfilePic({super.key, required this.onNext});
+  const StepProfilePic({super.key}); // Removed onNext callback as we pop back to Hub
 
   @override
   State<StepProfilePic> createState() => _StepProfilePicState();
@@ -21,14 +23,16 @@ class _StepProfilePicState extends State<StepProfilePic> {
   final ImagePicker _picker = ImagePicker();
   bool _isCameraReady = false;
   bool _hasPermission = false;
+  bool _isUploading = false; // Added: For loading state during DB update
 
   // Files
-  File? _rawFile;    // The original file (from camera or gallery)
-  File? _finalFile;  // The cropped result
+  File? _rawFile;
+  File? _finalFile;
   bool _isCropping = false;
 
   final _cropController = CropController(aspectRatio: 1.0);
   final Color primaryGreen = const Color(0xFF11A860);
+  final String uid = FirebaseAuth.instance.currentUser!.uid; // Added
 
   @override
   void initState() {
@@ -61,7 +65,6 @@ class _StepProfilePicState extends State<StepProfilePic> {
     }
   }
 
-  // --- SOURCE 1: CAMERA CAPTURE ---
   Future<void> _capturePhoto() async {
     if (!_isCameraReady) return;
     try {
@@ -75,19 +78,17 @@ class _StepProfilePicState extends State<StepProfilePic> {
     }
   }
 
-  // --- SOURCE 2: GALLERY PICKER ---
   Future<void> _pickFromGallery() async {
     final xFile = await _picker.pickImage(source: ImageSource.gallery);
     if (xFile != null) {
       setState(() {
         _rawFile = File(xFile.path);
         _isCropping = true;
-        _finalFile = null; // Reset if they were previewing another photo
+        _finalFile = null;
       });
     }
   }
 
-  // --- CROP PROCESSING ---
   Future<void> _processCrop() async {
     ui.Image bitmap = await _cropController.croppedBitmap();
     final data = await bitmap.toByteData(format: ui.ImageByteFormat.png);
@@ -103,6 +104,35 @@ class _StepProfilePicState extends State<StepProfilePic> {
     });
   }
 
+  // --- NEW: UPLOAD TO CLOUDINARY AND SAVE TO FIRESTORE ---
+  Future<void> _uploadAndSave() async {
+    if (_finalFile == null) return;
+    
+    setState(() => _isUploading = true);
+    try {
+      // 1. Upload to Cloudinary
+      String? url = await CloudinaryService.uploadImage(_finalFile!);
+
+      if (url != null) {
+        // 2. Update Firestore immediately
+        await FirebaseFirestore.instance.collection('users').doc(uid).update({
+          'profile_pic': url,
+        });
+
+        // 3. Go back to Hub
+        if (mounted) Navigator.pop(context);
+      } else {
+        throw Exception("Upload failed");
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Error saving photo: $e"), backgroundColor: Colors.red),
+      );
+    } finally {
+      if (mounted) setState(() => _isUploading = false);
+    }
+  }
+
   @override
   void dispose() {
     _cameraController?.dispose();
@@ -113,9 +143,18 @@ class _StepProfilePicState extends State<StepProfilePic> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.white,
-      body: Column(
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.black),
+          onPressed: () => Navigator.pop(context),
+        ),
+      ),
+      body: _isUploading 
+          ? const Center(child: CircularProgressIndicator(color: Color(0xFF11A860))) 
+          : Column(
         children: [
-          const SizedBox(height: 60),
           const Text("Profile Photo", style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
           const Text("Identity Verification", style: TextStyle(color: Colors.grey)),
           
@@ -141,7 +180,6 @@ class _StepProfilePicState extends State<StepProfilePic> {
   }
 
   Widget _buildViewStack() {
-    // 1. CROPPER
     if (_isCropping && _rawFile != null) {
       return CropImage(
         controller: _cropController, 
@@ -150,7 +188,6 @@ class _StepProfilePicState extends State<StepProfilePic> {
       );
     }
 
-    // 2. PREVIEW (After Cropping)
     if (_finalFile != null) {
       return Center(
         child: CircleAvatar(
@@ -160,7 +197,6 @@ class _StepProfilePicState extends State<StepProfilePic> {
       );
     }
 
-    // 3. LIVE CAMERA
     if (_isCameraReady && _hasPermission) {
       return Stack(
         fit: StackFit.expand,
@@ -183,7 +219,6 @@ class _StepProfilePicState extends State<StepProfilePic> {
   }
 
   Widget _buildBottomUI() {
-    // Stage: Editing/Cropping
     if (_isCropping) {
       return Row(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -202,7 +237,6 @@ class _StepProfilePicState extends State<StepProfilePic> {
       );
     }
 
-    // Stage: Result Preview
     if (_finalFile != null) {
       return Padding(
         padding: const EdgeInsets.symmetric(horizontal: 40),
@@ -211,8 +245,11 @@ class _StepProfilePicState extends State<StepProfilePic> {
             SizedBox(
               width: double.infinity, height: 55,
               child: ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: primaryGreen, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-                onPressed: () => widget.onNext(_finalFile!), 
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: primaryGreen, 
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))
+                ),
+                onPressed: _uploadAndSave, // Changed: Now uploads and saves to DB
                 child: const Text("CONTINUE", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
               ),
             ),
@@ -222,18 +259,15 @@ class _StepProfilePicState extends State<StepProfilePic> {
       );
     }
 
-    // Stage: Capture Selection
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 50),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          // Gallery Button
           IconButton(
             onPressed: _pickFromGallery,
             icon: const Icon(Icons.photo_library, size: 35, color: Colors.grey),
           ),
-          // Capture Button
           GestureDetector(
             onTap: _capturePhoto,
             child: Container(
@@ -250,7 +284,6 @@ class _StepProfilePicState extends State<StepProfilePic> {
               ),
             ),
           ),
-          // Placeholder to keep Capture Button centered
           const SizedBox(width: 48),
         ],
       ),

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-
 class DriverDetailView extends StatefulWidget {
   final String uid;
   const DriverDetailView({super.key, required this.uid});
@@ -24,29 +23,15 @@ class _DriverDetailViewState extends State<DriverDetailView> {
     "Other"
   ];
 
-  // --- 1. FETCH BOTH USER & APPLICATION DATA ---
-  Future<List<DocumentSnapshot>> _fetchDriverData() async {
-    return Future.wait([
-      FirebaseFirestore.instance.collection('users').doc(widget.uid).get(),
-      FirebaseFirestore.instance.collection('driver_applications').doc(widget.uid).get(),
-    ]);
-  }
-
-  // --- 2. UPDATE STATUS LOGIC ---
+  // --- 1. UPDATE STATUS LOGIC ---
   Future<void> _updateStatus(String status, String reason) async {
     await FirebaseFirestore.instance.collection('users').doc(widget.uid).update({
       'driver_status': status,
       'rejection_reason': status == 'rejected' ? reason : "",
-      // If approved, change role to driver. If rejected, stay as user.
+      // If approved, set role to driver.
       'role': status == 'approved' ? 'driver' : 'user', 
     });
     
-    // Update application status as well
-    await FirebaseFirestore.instance.collection('driver_applications').doc(widget.uid).update({
-      'status': status,
-      'rejection_reason': status == 'rejected' ? reason : "",
-    });
-
     if (mounted) Navigator.pop(context); 
   }
 
@@ -76,7 +61,7 @@ class _DriverDetailViewState extends State<DriverDetailView> {
             ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
               onPressed: () {
-                Navigator.pop(context); // Close dialog
+                Navigator.pop(context); 
                 _updateStatus('rejected', _selectedReason == "Other" ? _customReason.text : _selectedReason);
               },
               child: const Text("Reject", style: TextStyle(color: Colors.white)),
@@ -91,27 +76,24 @@ class _DriverDetailViewState extends State<DriverDetailView> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.grey[100],
-      appBar: AppBar(title: const Text("Review Driver")),
-      body: FutureBuilder<List<DocumentSnapshot>>(
-        future: _fetchDriverData(),
+      appBar: AppBar(
+        title: const Text("Review Driver Application"),
+        backgroundColor: Colors.white,
+        foregroundColor: Colors.black,
+        elevation: 0,
+      ),
+      body: StreamBuilder<DocumentSnapshot>(
+        // Fetching directly from 'users' collection
+        stream: FirebaseFirestore.instance.collection('users').doc(widget.uid).snapshots(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
-          if (snapshot.hasError || !snapshot.hasData) {
-            return const Center(child: Text("Error loading data"));
+          if (snapshot.hasError || !snapshot.hasData || !snapshot.data!.exists) {
+            return const Center(child: Text("Driver data not found"));
           }
 
-          // Extract Data
-          var userDoc = snapshot.data![0];
-          var appDoc = snapshot.data![1];
-
-          if (!userDoc.exists || !appDoc.exists) {
-             return const Center(child: Text("Data incomplete"));
-          }
-
-          var userData = userDoc.data() as Map<String, dynamic>;
-          var appData = appDoc.data() as Map<String, dynamic>;
+          var userData = snapshot.data!.data() as Map<String, dynamic>;
 
           return SingleChildScrollView(
             padding: const EdgeInsets.all(20),
@@ -125,7 +107,10 @@ class _DriverDetailViewState extends State<DriverDetailView> {
                       CircleAvatar(
                         radius: 50,
                         backgroundColor: Colors.grey[300],
-                        backgroundImage: NetworkImage(appData['profile_pic'] ?? ""),
+                        backgroundImage: userData['profile_pic'] != null 
+                            ? NetworkImage(userData['profile_pic']) 
+                            : null,
+                        child: userData['profile_pic'] == null ? const Icon(Icons.person, size: 50) : null,
                       ),
                       const SizedBox(height: 10),
                       Text(
@@ -142,7 +127,7 @@ class _DriverDetailViewState extends State<DriverDetailView> {
                 
                 const SizedBox(height: 25),
 
-                // --- PERSONAL DETAILS CARD ---
+                // --- PERSONAL DETAILS ---
                 const Text("Personal Details", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                 const SizedBox(height: 10),
                 Container(
@@ -152,14 +137,14 @@ class _DriverDetailViewState extends State<DriverDetailView> {
                     children: [
                       _buildInfoRow(Icons.phone, "Phone", userData['phone'] ?? "N/A"),
                       const Divider(),
-                      _buildInfoRow(Icons.cake, "Date of Birth", appData['dob'] ?? "N/A"),
+                      _buildInfoRow(Icons.cake, "Date of Birth", userData['dob'] ?? "N/A"),
                     ],
                   ),
                 ),
 
                 const SizedBox(height: 25),
 
-                // --- LICENSE DETAILS CARD ---
+                // --- LICENSE DETAILS ---
                 const Text("License Details", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                 const SizedBox(height: 10),
                 Container(
@@ -168,15 +153,15 @@ class _DriverDetailViewState extends State<DriverDetailView> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _buildInfoRow(Icons.badge, "License Number", appData['license_number'] ?? "N/A"),
+                      _buildInfoRow(Icons.badge, "License Number", userData['license_number'] ?? "N/A"),
                       const Divider(height: 30),
                       
                       const Text("Document Images", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
                       const SizedBox(height: 15),
                       
-                      _buildImageSection("License Front", appData['license_front']),
+                      _buildImageSection("License Front", userData['license_front']),
                       const SizedBox(height: 15),
-                      _buildImageSection("License Back", appData['license_back']),
+                      _buildImageSection("License Back", userData['license_back']),
                     ],
                   ),
                 ),
@@ -244,7 +229,6 @@ class _DriverDetailViewState extends State<DriverDetailView> {
         url != null 
           ? GestureDetector(
               onTap: () {
-                // Optional: Open full screen image
                 showDialog(context: context, builder: (_) => Dialog(child: Image.network(url)));
               },
               child: ClipRRect(

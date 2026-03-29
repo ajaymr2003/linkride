@@ -70,20 +70,18 @@ class _HomeModeSelectionState extends State<HomeModeSelection> {
 
   // --- 2. HANDLE CLICK BASED ON STORED RESULT ---
   void _handleDriverClick() {
-    if (_isLoadingStatus) return;
+  if (_isLoadingStatus) return;
 
-    if (_driverStatus == 'approved') {
-      setState(() => _currentView = HomeViewState.driver);
-    } else {
-      Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => const DriverSetupController()),
-      ).then((_) {
-        setState(() => _isLoadingStatus = true);
-        _fetchDriverStatus();
-      });
-    }
+  // REDIRECT: Anything except 'approved' goes to the Setup Controller
+  if (_driverStatus == 'approved') {
+    setState(() => _currentView = HomeViewState.driver);
+  } else {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const DriverSetupController()),
+    ).then((_) => _fetchDriverStatus()); // Refresh status when coming back
   }
+}
 
   Future<bool> _onWillPop() async {
     if (_currentView != HomeViewState.selection) {

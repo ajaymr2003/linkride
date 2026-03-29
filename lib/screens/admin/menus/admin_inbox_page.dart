@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
-import 'user_detail_view.dart';
+import '../driver_request/user_detail_view.dart';
 
 class AdminInboxPage extends StatelessWidget {
   const AdminInboxPage({super.key});

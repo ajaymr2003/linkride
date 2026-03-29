@@ -24,42 +24,95 @@ class _PassengerReviewPageState extends State<PassengerReviewPage> {
   bool _isSubmitting = false;
 
   final Color primaryGreen = const Color(0xFF11A860);
-  final Color darkGreen = const Color(0xFF2B5145);
+
+  Future<void> _updateUserAverageRating(String userId) async {
+    final reviewsQuery = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(userId)
+        .collection('reviews_received')
+        .get();
+
+    if (reviewsQuery.docs.isNotEmpty) {
+      double totalRating = 0;
+      for (var doc in reviewsQuery.docs) {
+        totalRating += (doc.data()['rating'] as num).toDouble();
+      }
+      double average = totalRating / reviewsQuery.docs.length;
+
+      await FirebaseFirestore.instance.collection('users').doc(userId).update({
+        'rating': double.parse(average.toStringAsFixed(1)),
+        'total_reviews': reviewsQuery.docs.length,
+      });
+    }
+  }
 
   Future<void> _submitReview() async {
+    if (_isSubmitting) return;
     setState(() => _isSubmitting = true);
+
     final String driverUid = FirebaseAuth.instance.currentUser!.uid;
+    final String comment = _commentController.text.trim();
 
     try {
-      // 1. Save review to the passenger's sub-collection
-      await FirebaseFirestore.instance
+      final batch = FirebaseFirestore.instance.batch();
+
+      // 1. Prepare Review Data
+      Map<String, dynamic> reviewData = {
+        'rating': _rating,
+        'comment': comment,
+        'reviewer_id': driverUid,
+        'target_id': widget.passengerUid,
+        'ride_id': widget.rideId,
+        'type': 'passenger_review',
+        'timestamp': FieldValue.serverTimestamp(),
+      };
+
+      // 2. Global collection entry
+      DocumentReference globalRef = FirebaseFirestore.instance.collection('reviews').doc();
+      batch.set(globalRef, reviewData);
+
+      // 3. Passenger sub-collection entry
+      DocumentReference userSubRef = FirebaseFirestore.instance
           .collection('users')
           .doc(widget.passengerUid)
           .collection('reviews_received')
-          .add({
-        'rating': _rating,
-        'comment': _commentController.text.trim(),
-        'reviewer_id': driverUid,
-        'reviewer_name': "Driver", // Optional: fetch driver name if needed
-        'ride_id': widget.rideId,
-        'timestamp': FieldValue.serverTimestamp(),
-      });
+          .doc(globalRef.id);
+      batch.set(userSubRef, reviewData);
 
-      // 2. Update the passenger's average rating (Optional but recommended)
-      // For now, we just finish the flow.
+      // --- NEW: UPDATE BOOKING STATUS ---
+      var bookingQuery = await FirebaseFirestore.instance
+          .collection('bookings')
+          .where('ride_id', isEqualTo: widget.rideId)
+          .where('passenger_uid', isEqualTo: widget.passengerUid)
+          .limit(1)
+          .get();
+
+      if (bookingQuery.docs.isNotEmpty) {
+        batch.update(bookingQuery.docs.first.reference, {
+          'status': 'completed',
+          'completed_at': FieldValue.serverTimestamp(),
+        });
+      }
+
+      // Execute all updates
+      await batch.commit();
+
+      // 4. Update Passenger profile rating stats
+      await _updateUserAverageRating(widget.passengerUid);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text("Review submitted successfully!")),
         );
-        // 3. Return to the very first screen (Dashboard)
         Navigator.of(context).popUntil((route) => route.isFirst);
       }
     } catch (e) {
       setState(() => _isSubmitting = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Error submitting review.")),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Error submitting review.")),
+        );
+      }
     }
   }
 
@@ -70,7 +123,7 @@ class _PassengerReviewPageState extends State<PassengerReviewPage> {
       appBar: AppBar(
         title: const Text("Rate Passenger"), 
         elevation: 0,
-        automaticallyImplyLeading: false, // Prevent going back to payment
+        automaticallyImplyLeading: false, 
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(30),
@@ -93,7 +146,6 @@ class _PassengerReviewPageState extends State<PassengerReviewPage> {
             
             const SizedBox(height: 40),
 
-            // Star Selection
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: List.generate(5, (index) {

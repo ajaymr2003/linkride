@@ -8,8 +8,7 @@ class NoInternetScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      // This dims the background app
-      color: Colors.black54,
+      color: Colors.black.withOpacity(0.7), // Darkened background
       child: Center(
         child: Container(
           margin: const EdgeInsets.symmetric(horizontal: 30),
@@ -17,9 +16,6 @@ class NoInternetScreen extends StatelessWidget {
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(20),
-            boxShadow: const [
-              BoxShadow(color: Colors.black26, blurRadius: 10, spreadRadius: 1),
-            ],
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -32,18 +28,15 @@ class NoInternetScreen extends StatelessWidget {
                   fontSize: 22,
                   fontWeight: FontWeight.bold,
                   color: Colors.black87,
-                  decoration: TextDecoration.none,
                 ),
               ),
               const SizedBox(height: 12),
               const Text(
-                'Please check your connection and try again.',
+                'Please check your data connection and try again.',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 14,
                   color: Colors.grey,
-                  decoration: TextDecoration.none,
-                  fontWeight: FontWeight.normal,
                 ),
               ),
               const SizedBox(height: 30),
@@ -52,7 +45,7 @@ class NoInternetScreen extends StatelessWidget {
                 child: ElevatedButton(
                   onPressed: onRetry,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blue.shade700,
+                    backgroundColor: const Color(0xFF11A860), // LinkRide Green
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 12),
                     shape: RoundedRectangleBorder(
@@ -60,7 +53,7 @@ class NoInternetScreen extends StatelessWidget {
                     ),
                   ),
                   child: const Text(
-                    'OK',
+                    'RETRY',
                     style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                   ),
                 ),

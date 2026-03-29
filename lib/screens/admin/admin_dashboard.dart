@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
-import 'admin_home_page.dart';
-import 'driver_approval_screen.dart';
-import 'user_management_screen.dart';
-import 'admin_inbox_page.dart';
-import 'admin_profile_page.dart';
+import 'menus/admin_home_page.dart';
+import 'driver_request/driver_approval_screen.dart';
+import 'menus/user_management_screen.dart';
+import 'menus/admin_inbox_page.dart';
+import 'menus/admin_profile_page.dart';
 
 class AdminDashboard extends StatefulWidget {
   const AdminDashboard({super.key});

@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'driver_approval_screen.dart';
+import '../driver_request/driver_approval_screen.dart';
 import 'user_management_screen.dart';
-import 'main_active.dart'; // 1. Updated Import
+import '../ride_details/main_active.dart';
+import 'admin_reports_page.dart'; 
 
 class AdminHomePage extends StatelessWidget {
   const AdminHomePage({super.key});
@@ -93,49 +94,31 @@ class AdminHomePage extends StatelessWidget {
             const Text("Operations", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 15),
             
-            // --- UPDATED: ACTIVE RIDES BUTTON ---
-            InkWell(
-              onTap: () {
-                 // Navigation now points to the new MainActivePage (the one with tabs)
-                 Navigator.push(context, MaterialPageRoute(builder: (_) => const MainActivePage()));
-              },
-              child: Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(25),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [primaryGreen, darkGreen],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
+            // --- UPDATED SIDE-BY-SIDE BUTTONS ---
+            Row(
+              children: [
+                Expanded(
+                  child: _buildOpCard(
+                    context,
+                    title: "Ride Monitor",
+                    subtitle: "Live tracking",
+                    icon: Icons.map_outlined,
+                    color: primaryGreen,
+                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const MainActivePage())),
                   ),
-                  borderRadius: BorderRadius.circular(20),
-                  boxShadow: [
-                    BoxShadow(color: primaryGreen.withOpacity(0.3), blurRadius: 10, offset: const Offset(0, 5)),
-                  ],
                 ),
-                child: Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.2),
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(Icons.directions_car_filled, color: Colors.white, size: 30),
-                    ),
-                    const SizedBox(width: 20),
-                    const Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text("Ride Monitor", style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
-                        Text("Active & Past Rides", style: TextStyle(color: Colors.white70, fontSize: 14)),
-                      ],
-                    ),
-                    const Spacer(),
-                    const Icon(Icons.arrow_forward_ios, color: Colors.white70, size: 20),
-                  ],
+                const SizedBox(width: 15),
+                Expanded(
+                  child: _buildOpCard(
+                    context,
+                    title: "System Reports",
+                    subtitle: "Analytics",
+                    icon: Icons.bar_chart_rounded,
+                    color: darkGreen,
+                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminReportsPage())),
+                  ),
                 ),
-              ),
+              ],
             ),
 
             const SizedBox(height: 25),
@@ -144,6 +127,31 @@ class AdminHomePage extends StatelessWidget {
             _buildInfoTile(Icons.check_circle, Colors.green, "Server Status", "Online and stable"),
             _buildInfoTile(Icons.storage, Colors.purple, "Database", "Optimized"),
             _buildInfoTile(Icons.security, Colors.red, "Security", "No threats detected"),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Helper for the Operations Cards (Monitor & Reports)
+  Widget _buildOpCard(BuildContext context, {required String title, required String subtitle, required IconData icon, required Color color, required VoidCallback onTap}) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(20),
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: color,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [BoxShadow(color: color.withOpacity(0.3), blurRadius: 8, offset: const Offset(0, 4))],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, color: Colors.white, size: 30),
+            const SizedBox(height: 15),
+            Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
+            Text(subtitle, style: const TextStyle(color: Colors.white70, fontSize: 11)),
           ],
         ),
       ),
